@@ -1,0 +1,273 @@
+```md
+# Frontend Fix: AI Invoice Flow
+
+## API Base URL
+
+```text
+http://161.153.29.155:8000
+```
+
+## Correct Flow
+
+The frontend must not send every `/ai/invoice/extract` response to `/invoices/draft/complete`.
+
+Only call `/invoices/draft/complete` when the extraction response contains a valid `draft`.
+
+---
+
+## Step 1: Send Chat Message
+
+```http
+POST /ai/invoice/extract
+```
+
+Request:
+
+```json
+{
+  "message": "Create an invoice for Alex for website design, 300 dollars."
+}
+```
+
+---
+
+## Step 2: Handle Response Status
+
+### Case 1: AI Parse Error
+
+Response:
+
+```json
+{
+  "status": "ai_parse_error",
+  "message": "Could not extract invoice details. Please provide client name, invoice items, and prices manually."
+}
+```
+
+Frontend behavior:
+
+- Show the message to the user.
+- Do **not** call `/invoices/draft/complete`.
+
+---
+
+### Case 2: LLM Unavailable
+
+Response:
+
+```json
+{
+  "status": "llm_unavailable",
+  "message": "AI assistant is temporarily unavailable. Please enter invoice details manually."
+}
+```
+
+Frontend behavior:
+
+- Show the message to the user.
+- Do **not** call `/invoices/draft/complete`.
+
+---
+
+### Case 3: Missing Fields
+
+Response:
+
+```json
+{
+  "status": "missing_fields",
+  "draft": {
+    "document_type": "invoice",
+    "invoice_number": null,
+    "issue_date": null,
+    "currency": "USD",
+    "business": {
+      "name": null,
+      "email": null,
+      "address": null
+    },
+    "client": {
+      "name": "Alex",
+      "email": null,
+      "address": null
+    },
+    "items": [
+      {
+        "description": "Website design",
+        "quantity": 1,
+        "unit_price": 300
+      }
+    ],
+    "notes": null,
+    "payment_terms": null
+  },
+  "missing_fields": [
+    "invoice_number",
+    "issue_date",
+    "business.name"
+  ]
+}
+```
+
+Frontend behavior:
+
+- Show a form for the missing fields.
+- Merge user-provided missing values into `draft`.
+- Then call `/invoices/draft/complete`.
+
+---
+
+### Case 4: Ready
+
+Response:
+
+```json
+{
+  "status": "ready",
+  "draft": {
+    "document_type": "invoice",
+    "invoice_number": "INV-001",
+    "issue_date": "2026-06-28",
+    "currency": "USD",
+    "business": {
+      "name": "Sargis Studio",
+      "email": "hello@example.com",
+      "address": "Yerevan, Armenia"
+    },
+    "client": {
+      "name": "Alex",
+      "email": "alex@example.com",
+      "address": null
+    },
+    "items": [
+      {
+        "description": "Website design",
+        "quantity": 1,
+        "unit_price": 300
+      }
+    ],
+    "notes": null,
+    "payment_terms": null
+  },
+  "missing_fields": []
+}
+```
+
+Frontend behavior:
+
+- Call `/invoices/draft/complete` with the returned draft.
+
+---
+
+## Step 3: Complete Draft
+
+```http
+POST /invoices/draft/complete
+```
+
+Request:
+
+```json
+{
+  "draft": {
+    "document_type": "invoice",
+    "invoice_number": "INV-001",
+    "issue_date": "2026-06-28",
+    "due_date": "2026-07-05",
+    "currency": "USD",
+    "business": {
+      "name": "Sargis Studio",
+      "email": "hello@example.com",
+      "address": "Yerevan, Armenia"
+    },
+    "client": {
+      "name": "Alex",
+      "email": "alex@example.com",
+      "address": null
+    },
+    "items": [
+      {
+        "description": "Website design",
+        "quantity": 1,
+        "unit_price": 300
+      }
+    ],
+    "notes": "Thank you for your business.",
+    "payment_terms": "Payment due within 7 days."
+  }
+}
+```
+
+Expected response:
+
+```json
+{
+  "status": "created",
+  "invoice_id": 1,
+  "invoice_number": "INV-001",
+  "subtotal": 300,
+  "total": 300,
+  "currency": "USD",
+  "pdf_url": "/invoices/1/download"
+}
+```
+
+Download URL:
+
+```ts
+const downloadUrl = `${API_BASE_URL}${created.pdf_url}`;
+```
+
+---
+
+## Important Rule
+
+Never send this to `/invoices/draft/complete`:
+
+```json
+{
+  "status": "ai_parse_error",
+  "message": "..."
+}
+```
+
+`/invoices/draft/complete` only accepts:
+
+```json
+{
+  "draft": { ... }
+}
+```
+
+---
+
+## Pseudocode
+
+```ts
+const extraction = await post("/ai/invoice/extract", { message });
+
+if (extraction.status === "ai_parse_error") {
+  showMessage(extraction.message);
+  return;
+}
+
+if (extraction.status === "llm_unavailable") {
+  showMessage(extraction.message);
+  return;
+}
+
+if (extraction.status === "missing_fields") {
+  showMissingFieldsForm(extraction.draft, extraction.missing_fields);
+  return;
+}
+
+if (extraction.status === "ready") {
+  const created = await post("/invoices/draft/complete", {
+    draft: extraction.draft,
+  });
+
+  const downloadUrl = `${API_BASE_URL}${created.pdf_url}`;
+  showDownloadLink(downloadUrl);
+}
+```
+```
