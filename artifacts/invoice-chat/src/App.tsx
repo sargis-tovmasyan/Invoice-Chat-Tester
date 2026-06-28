@@ -15,9 +15,9 @@ import {
 const PROXY_BASE = "/api/proxy";
 
 const EXAMPLE_PROMPTS = [
-  "Create an invoice for Alex for website design, 300 dollars",
-  "Invoice for TechStart Ltd: logo design $800, homepage $1,200",
-  "Invoice for John Smith: 3 × Product A at $99, 2 × Product B at $45",
+  "Create invoice INV-001 from Sargis Studio for client Alex Johnson, issued 2026-06-28, due 2026-07-05, USD — website design $300",
+  "Invoice INV-002 from Sargis Studio to TechStart Ltd, issued today, due in 7 days, USD — logo design $800, homepage build $1,200",
+  "Invoice INV-003 from Sargis Studio for John Smith, issued 2026-06-28, due 2026-07-12, USD — 3 × Product A at $99 each, 2 × Product B at $45 each",
 ];
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -584,11 +584,6 @@ export default function App() {
               disabled={isBlocked}
               className="text-xs px-2.5 py-1.5 rounded-lg border border-border bg-secondary hover:bg-accent transition-colors disabled:opacity-40">
               Health
-            </button>
-            <button onClick={() => runAction("POST /ai/test", () => apiPost("/ai-test", {}))}
-              disabled={isBlocked}
-              className="text-xs px-2.5 py-1.5 rounded-lg border border-border bg-secondary hover:bg-accent transition-colors disabled:opacity-40">
-              AI Test
             </button>
             <button onClick={() => runAction("GET /invoices", () => apiGet("/invoices"))}
               disabled={isBlocked}
