@@ -1,4 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  unlockAudio,
+  playSend,
+  playReceive,
+  playSuccess,
+  playError,
+  playMissingFields,
+  playConfirm,
+  playPing,
+} from "./lib/sounds";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -321,6 +331,17 @@ export default function App() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Unlock AudioContext on first interaction (browser requirement)
+  useEffect(() => {
+    const unlock = () => { unlockAudio(); };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading, pendingForm]);
@@ -342,6 +363,7 @@ export default function App() {
     const { data, ok } = await apiPost<CompleteResponse>("/complete", { draft });
 
     if (!ok || (data.status && data.status !== "created" && !data.invoice_id)) {
+      playError();
       addMsg({
         role: "error",
         text: `Draft complete failed: ${String((data as Record<string, unknown>).message ?? (data as Record<string, unknown>).detail ?? "Unexpected response")}`,
@@ -350,6 +372,7 @@ export default function App() {
       return;
     }
 
+    playSuccess();
     addMsg({
       role: "assistant",
       text: `Invoice created — ${data.invoice_number ?? `#${data.invoice_id}`}`,
@@ -361,6 +384,7 @@ export default function App() {
 
   const handleFormSubmit = async () => {
     if (!pendingForm || formSubmitting) return;
+    playConfirm();
     setFormSubmitting(true);
 
     // Merge form values into draft using dot-path setter
@@ -393,6 +417,7 @@ export default function App() {
     if (!text || loading || pendingForm !== null) return;
     if (!preset) setInput("");
 
+    playSend();
     addMsg({ role: "user", text });
     setLoading(true);
     setLoadingLabel("Extracting invoice details…");
@@ -401,6 +426,7 @@ export default function App() {
       const { data: extractData, ok } = await apiPost<ExtractResponse>("/extract", { message: text });
 
       if (!ok) {
+        playError();
         addMsg({
           role: "error",
           text: `Extract request failed: ${String(extractData.message ?? "Server error")}`,
@@ -413,6 +439,7 @@ export default function App() {
 
       // ── ai_parse_error ──
       if (status === "ai_parse_error") {
+        playError();
         addMsg({
           role: "error",
           text: extractData.message ?? "Could not parse invoice details. Please try rephrasing.",
@@ -423,6 +450,7 @@ export default function App() {
 
       // ── llm_unavailable ──
       if (status === "llm_unavailable") {
+        playError();
         addMsg({
           role: "error",
           text: extractData.message ?? "AI assistant is temporarily unavailable. Please try again later.",
@@ -437,6 +465,7 @@ export default function App() {
         const fields = extractData.missing_fields ?? [];
         const formMsgId = uid();
 
+        playMissingFields();
         addMsg({
           id: formMsgId,
           role: "assistant",
@@ -458,6 +487,7 @@ export default function App() {
       if (status === "ready") {
         const draft = extractData.draft;
         if (!draft) {
+          playError();
           addMsg({
             role: "error",
             text: "Extract returned ready but no draft was included.",
@@ -466,6 +496,7 @@ export default function App() {
           return;
         }
 
+        playReceive();
         addMsg({
           role: "assistant",
           text: "All details extracted. Creating your invoice…",
@@ -477,6 +508,7 @@ export default function App() {
       }
 
       // ── unknown status fallback ──
+      playReceive();
       addMsg({
         role: "assistant",
         text: `Received status "${status ?? "unknown"}" from the API.`,
@@ -484,6 +516,7 @@ export default function App() {
       });
 
     } catch (err) {
+      playError();
       addMsg({ role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
       setLoading(false);
@@ -500,8 +533,10 @@ export default function App() {
     setLoadingLabel(`${label}…`);
     try {
       const { data } = await fn();
+      playPing();
       addMsg({ role: "assistant", text: `Response — ${label}`, payload: { kind: "generic", raw: data }, showRaw: true });
     } catch (err) {
+      playError();
       addMsg({ role: "error", text: `${label} failed: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
       setLoading(false);
