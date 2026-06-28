@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Invoice Chat Tester"
+version = "1.0.0"
+id = "artifacts/invoice-chat"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18747
+
+[services.development]
+run = "pnpm --filter @workspace/invoice-chat run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/invoice-chat", "run", "build" ]
+publicDir = "artifacts/invoice-chat/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18747"
+BASE_PATH = "/"
