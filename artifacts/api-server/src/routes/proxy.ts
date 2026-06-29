@@ -47,6 +47,11 @@ proxyRouter.post("/extract", async (req, res) => {
   await jsonProxy("/ai/invoice/extract", "POST", req.body, res);
 });
 
+// POST /api/proxy/chat  →  POST VPS /ai/chat
+proxyRouter.post("/chat", async (req, res) => {
+  await jsonProxy("/ai/chat", "POST", req.body, res);
+});
+
 // POST /api/proxy/complete  →  POST VPS /invoices/draft/complete
 proxyRouter.post("/complete", async (req, res) => {
   await jsonProxy("/invoices/draft/complete", "POST", req.body, res);

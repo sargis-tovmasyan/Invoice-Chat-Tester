@@ -15,23 +15,23 @@ import {
 const PROXY_BASE = "/api/proxy";
 
 const EXAMPLE_PROMPTS = [
+  "Hi",
+  "Show me all my invoices",
   "Create invoice INV-001 from Sargis Studio for client Alex Johnson, issued 2026-06-28, due 2026-07-05, USD — website design $300",
-  "Invoice INV-002 from Sargis Studio to TechStart Ltd, issued today, due in 7 days, USD — logo design $800, homepage build $1,200",
-  "Invoice INV-003 from Sargis Studio for John Smith, issued 2026-06-28, due 2026-07-12, USD — 3 × Product A at $99 each, 2 × Product B at $45 each",
 ];
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type MessageRole = "user" | "assistant" | "system" | "error";
 
-type ExtractStatus = "missing_fields" | "ready" | "ai_parse_error" | "llm_unavailable" | string;
-
-interface ExtractResponse {
-  status: ExtractStatus;
-  message?: string;
-  draft?: DraftObject;
-  missing_fields?: string[];
-}
+type ChatStatus =
+  | "answer"
+  | "invoice_list"
+  | "created"
+  | "missing_fields"
+  | "ai_parse_error"
+  | "llm_unavailable"
+  | string;
 
 interface DraftObject {
   [key: string]: unknown;
@@ -48,8 +48,30 @@ interface CompleteResponse {
   [key: string]: unknown;
 }
 
+interface InvoiceListItem {
+  id: number | string;
+  invoice_number: string;
+  issue_date?: string;
+  due_date?: string | null;
+  currency?: string;
+  business_name?: string;
+  client_name?: string;
+  total?: number | string;
+  pdf_url?: string;
+  created_at?: string;
+}
+
+interface ChatResponse extends CompleteResponse {
+  status: ChatStatus;
+  message?: string;
+  invoices?: InvoiceListItem[];
+  missing_fields?: string[];
+  draft?: DraftObject;
+}
+
 type ParsedPayload =
   | { kind: "invoice"; data: CompleteResponse; raw: unknown }
+  | { kind: "invoice_list"; invoices: InvoiceListItem[]; raw: unknown }
   | { kind: "missing_fields"; fields: string[]; draft: DraftObject; raw: unknown }
   | { kind: "error_status"; message: string; status: string; raw: unknown }
   | { kind: "generic"; raw: unknown };
@@ -208,6 +230,58 @@ function InvoiceCard({ data, raw, showRaw, onToggle }: { data: CompleteResponse;
         ) : data.pdf_url ? (
           <p className="text-xs text-emerald-700 break-all">PDF: {data.pdf_url}</p>
         ) : null}
+      </div>
+      <RawToggle raw={raw} showRaw={showRaw} onToggle={onToggle} />
+    </div>
+  );
+}
+
+function InvoiceListCard({ invoices, raw, showRaw, onToggle }: { invoices: InvoiceListItem[]; raw: unknown; showRaw: boolean; onToggle: () => void }) {
+  return (
+    <div className="mt-3 w-full max-w-md">
+      <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-8 h-8 rounded-full bg-sky-100 flex items-center justify-center flex-shrink-0">
+            <svg className="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h18M3 17h18" />
+            </svg>
+          </div>
+          <div className="text-xs font-semibold text-sky-700 uppercase tracking-wide">Invoices</div>
+        </div>
+
+        {invoices.length === 0 ? (
+          <div className="rounded-lg bg-white/70 px-3 py-2 text-sm text-sky-900">No invoices found.</div>
+        ) : (
+          <div className="space-y-2">
+            {invoices.map((invoice) => {
+              const proxyPdf = invoice.pdf_url ? pdfProxyUrl(invoice.pdf_url) : null;
+              return (
+                <div key={invoice.id} className="rounded-lg bg-white/70 px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-sky-950 truncate">{invoice.invoice_number}</div>
+                      <div className="text-xs text-sky-700 truncate">
+                        {invoice.client_name ?? "Unknown client"} · {invoice.issue_date ?? "No issue date"}
+                      </div>
+                    </div>
+                    <div className="text-sm font-bold text-sky-800 flex-shrink-0">
+                      {formatCurrency(invoice.total, invoice.currency)}
+                    </div>
+                  </div>
+                  {proxyPdf && (
+                    <a href={proxyPdf} target="_blank" rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:text-sky-900">
+                      Open PDF
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       <RawToggle raw={raw} showRaw={showRaw} onToggle={onToggle} />
     </div>
@@ -420,30 +494,51 @@ export default function App() {
     playSend();
     addMsg({ role: "user", text });
     setLoading(true);
-    setLoadingLabel("Extracting invoice details…");
+    setLoadingLabel("Thinking…");
 
     try {
-      const { data: extractData, ok } = await apiPost<ExtractResponse>("/extract", { message: text });
+      const { data: chatData, ok } = await apiPost<ChatResponse>("/chat", { message: text });
 
       if (!ok) {
         playError();
         addMsg({
           role: "error",
-          text: `Extract request failed: ${String(extractData.message ?? "Server error")}`,
-          payload: { kind: "generic", raw: extractData },
+          text: `Chat request failed: ${String(chatData.message ?? (chatData as Record<string, unknown>).detail ?? "Server error")}`,
+          payload: { kind: "generic", raw: chatData },
         });
         return;
       }
 
-      const status = extractData.status;
+      const status = chatData.status;
+
+      // ── answer ──
+      if (status === "answer") {
+        playReceive();
+        addMsg({
+          role: "assistant",
+          text: chatData.message ?? "How can I help?",
+        });
+        return;
+      }
+
+      // ── invoice_list ──
+      if (status === "invoice_list") {
+        playPing();
+        addMsg({
+          role: "assistant",
+          text: chatData.message ?? "Here are your invoices.",
+          payload: { kind: "invoice_list", invoices: chatData.invoices ?? [], raw: chatData },
+        });
+        return;
+      }
 
       // ── ai_parse_error ──
       if (status === "ai_parse_error") {
         playError();
         addMsg({
           role: "error",
-          text: extractData.message ?? "Could not parse invoice details. Please try rephrasing.",
-          payload: { kind: "error_status", message: extractData.message ?? "", status, raw: extractData },
+          text: chatData.message ?? "Could not parse your request. Please try rephrasing.",
+          payload: { kind: "error_status", message: chatData.message ?? "", status, raw: chatData },
         });
         return;
       }
@@ -453,16 +548,27 @@ export default function App() {
         playError();
         addMsg({
           role: "error",
-          text: extractData.message ?? "AI assistant is temporarily unavailable. Please try again later.",
-          payload: { kind: "error_status", message: extractData.message ?? "", status, raw: extractData },
+          text: chatData.message ?? "AI assistant is temporarily unavailable. Please try again later.",
+          payload: { kind: "error_status", message: chatData.message ?? "", status, raw: chatData },
+        });
+        return;
+      }
+
+      // ── created ──
+      if (status === "created" || chatData.invoice_id) {
+        playSuccess();
+        addMsg({
+          role: "assistant",
+          text: `Invoice created — ${chatData.invoice_number ?? `#${chatData.invoice_id}`}`,
+          payload: { kind: "invoice", data: chatData, raw: chatData },
         });
         return;
       }
 
       // ── missing_fields ──
       if (status === "missing_fields") {
-        const draft = extractData.draft ?? {};
-        const fields = extractData.missing_fields ?? [];
+        const draft = chatData.draft ?? {};
+        const fields = chatData.missing_fields ?? [];
         const formMsgId = uid();
 
         playMissingFields();
@@ -470,7 +576,7 @@ export default function App() {
           id: formMsgId,
           role: "assistant",
           text: "I need a few more details to complete your invoice:",
-          payload: { kind: "missing_fields", fields, draft, raw: extractData },
+          payload: { kind: "missing_fields", fields, draft, raw: chatData },
         });
 
         setPendingForm({
@@ -483,36 +589,12 @@ export default function App() {
         return;
       }
 
-      // ── ready ──
-      if (status === "ready") {
-        const draft = extractData.draft;
-        if (!draft) {
-          playError();
-          addMsg({
-            role: "error",
-            text: "Extract returned ready but no draft was included.",
-            payload: { kind: "generic", raw: extractData },
-          });
-          return;
-        }
-
-        playReceive();
-        addMsg({
-          role: "assistant",
-          text: "All details extracted. Creating your invoice…",
-          payload: { kind: "generic", raw: extractData },
-        });
-
-        await callComplete(draft);
-        return;
-      }
-
       // ── unknown status fallback ──
       playReceive();
       addMsg({
         role: "assistant",
         text: `Received status "${status ?? "unknown"}" from the API.`,
-        payload: { kind: "generic", raw: extractData },
+        payload: { kind: "generic", raw: chatData },
       });
 
     } catch (err) {
@@ -570,7 +652,7 @@ export default function App() {
               </svg>
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-semibold leading-tight">Invoice AI Tester</div>
+              <div className="text-sm font-semibold leading-tight">Document AI Tester</div>
               <div className="text-xs text-muted-foreground leading-tight truncate hidden sm:block">
                 {pendingForm && !pendingForm.submitted
                   ? `⚠ Fill in: ${pendingForm.fields.join(", ")}`
@@ -613,15 +695,12 @@ export default function App() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
-                <h2 className="text-base font-semibold mb-1">Invoice AI Tester</h2>
+                <h2 className="text-base font-semibold mb-1">Document AI Tester</h2>
                 <p className="text-sm text-muted-foreground max-w-xs mb-6">
-                  Describe an invoice in plain language. The flow:{" "}
-                  <code className="text-xs bg-muted px-1 rounded">extract</code> →{" "}
-                  <code className="text-xs bg-muted px-1 rounded">fill missing fields</code> →{" "}
-                  <code className="text-xs bg-muted px-1 rounded">draft/complete</code>
+                  Ready for professional document questions and invoices.
                 </p>
                 <div className="w-full max-w-sm space-y-2 text-left">
-                  <div className="text-xs font-medium text-muted-foreground mb-1">Try an example:</div>
+                  <div className="text-xs font-medium text-muted-foreground mb-1">Examples</div>
                   {EXAMPLE_PROMPTS.map((p, i) => (
                     <button key={i} onClick={() => sendMessage(p)}
                       className="w-full text-left text-sm px-4 py-3 rounded-xl border border-border bg-card hover:bg-accent hover:border-primary/30 transition-all leading-snug">
@@ -679,6 +758,11 @@ export default function App() {
                     {/* Invoice result */}
                     {payload?.kind === "invoice" && (
                       <InvoiceCard data={payload.data} raw={payload.raw} showRaw={msg.showRaw ?? false} onToggle={() => toggleRaw(msg.id)} />
+                    )}
+
+                    {/* Invoice list */}
+                    {payload?.kind === "invoice_list" && (
+                      <InvoiceListCard invoices={payload.invoices} raw={payload.raw} showRaw={msg.showRaw ?? false} onToggle={() => toggleRaw(msg.id)} />
                     )}
 
                     {/* Missing fields — show form if this message's form is still active, else show submitted state */}
