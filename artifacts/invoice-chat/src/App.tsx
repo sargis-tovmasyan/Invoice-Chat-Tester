@@ -49,16 +49,17 @@ interface CompleteResponse {
 }
 
 interface InvoiceListItem {
-  id: number | string;
-  invoice_number: string;
+  id?: number | string;
+  invoice_number?: string;
   issue_date?: string;
-  due_date?: string | null;
+  due_date?: string;
   currency?: string;
   business_name?: string;
   client_name?: string;
-  total?: number | string;
+  total?: number;
   pdf_url?: string;
   created_at?: string;
+  [key: string]: unknown;
 }
 
 interface ChatResponse extends CompleteResponse {
@@ -370,6 +371,115 @@ function MissingFieldsForm({
   );
 }
 
+function InvoiceListPanel({
+  invoices,
+  raw,
+  showRaw,
+  onToggle,
+}: {
+  invoices: InvoiceListItem[];
+  raw: unknown;
+  showRaw: boolean;
+  onToggle: () => void;
+}) {
+  if (invoices.length === 0) {
+    return (
+      <div className="mt-3 w-full max-w-xl">
+        <div className="rounded-xl border border-border bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">
+          No invoices found.
+        </div>
+        <RawToggle raw={raw} showRaw={showRaw} onToggle={onToggle} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 w-full max-w-xl">
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        {/* Header */}
+        <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-4 py-2 bg-muted/50 border-b border-border">
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Invoice</div>
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-20 text-right">Issued</div>
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-20 text-right">Total</div>
+          <div className="w-28" />
+        </div>
+
+        {/* Rows */}
+        {invoices.map((inv, i) => {
+          const proxyPdf = inv.pdf_url ? pdfProxyUrl(inv.pdf_url) : null;
+          const label = inv.invoice_number ?? `#${inv.id ?? i + 1}`;
+          const client = inv.client_name ?? inv.business_name ?? "—";
+          const issued = inv.issue_date ?? "—";
+          const total = formatCurrency(inv.total, inv.currency);
+
+          return (
+            <div
+              key={inv.id ?? i}
+              className={`grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-4 py-3 ${i < invoices.length - 1 ? "border-b border-border" : ""} hover:bg-muted/30 transition-colors`}
+            >
+              {/* Invoice info */}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-foreground">{label}</span>
+                  {inv.due_date && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/8 text-primary border border-primary/20 font-medium">
+                      due {inv.due_date}
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground truncate">{client}</div>
+              </div>
+
+              {/* Issue date */}
+              <div className="text-xs text-muted-foreground w-20 text-right tabular-nums">{issued}</div>
+
+              {/* Total */}
+              <div className="text-sm font-semibold text-foreground w-20 text-right tabular-nums">{total}</div>
+
+              {/* Actions */}
+              <div className="flex gap-1.5 w-28 justify-end">
+                {proxyPdf ? (
+                  <>
+                    <a
+                      href={proxyPdf}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Open PDF"
+                      className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                    <a
+                      href={proxyPdf}
+                      download={`${label}.pdf`}
+                      title="Download PDF"
+                      className="flex items-center justify-center w-7 h-7 rounded-lg bg-muted text-muted-foreground hover:bg-emerald-100 hover:text-emerald-700 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    </a>
+                  </>
+                ) : (
+                  <span className="text-xs text-muted-foreground italic">no PDF</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Summary line */}
+      <div className="mt-1.5 px-1 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{invoices.length} invoice{invoices.length !== 1 ? "s" : ""}</span>
+        <RawToggle raw={raw} showRaw={showRaw} onToggle={onToggle} />
+      </div>
+    </div>
+  );
+}
+
 function TypingIndicator({ label }: { label: string }) {
   return (
     <div className="flex items-end gap-2 mb-4">
@@ -616,7 +726,23 @@ export default function App() {
     try {
       const { data } = await fn();
       playPing();
-      addMsg({ role: "assistant", text: `Response — ${label}`, payload: { kind: "generic", raw: data }, showRaw: true });
+
+      // Detect invoice list response — array of objects with invoice_number or id
+      const isInvoiceList =
+        Array.isArray(data) &&
+        data.length >= 0 &&
+        (data.length === 0 || (typeof data[0] === "object" && data[0] !== null && ("invoice_number" in data[0] || "id" in data[0])));
+
+      if (isInvoiceList) {
+        addMsg({
+          role: "assistant",
+          text: `Found ${(data as unknown[]).length} invoice${(data as unknown[]).length !== 1 ? "s" : ""}`,
+          payload: { kind: "invoice_list", invoices: data as InvoiceListItem[], raw: data },
+          showRaw: false,
+        });
+      } else {
+        addMsg({ role: "assistant", text: `Response — ${label}`, payload: { kind: "generic", raw: data }, showRaw: true });
+      }
     } catch (err) {
       playError();
       addMsg({ role: "error", text: `${label} failed: ${err instanceof Error ? err.message : String(err)}` });
@@ -762,7 +888,7 @@ export default function App() {
 
                     {/* Invoice list */}
                     {payload?.kind === "invoice_list" && (
-                      <InvoiceListCard invoices={payload.invoices} raw={payload.raw} showRaw={msg.showRaw ?? false} onToggle={() => toggleRaw(msg.id)} />
+                      <InvoiceListPanel invoices={payload.invoices} raw={payload.raw} showRaw={msg.showRaw ?? false} onToggle={() => toggleRaw(msg.id)} />
                     )}
 
                     {/* Missing fields — show form if this message's form is still active, else show submitted state */}
