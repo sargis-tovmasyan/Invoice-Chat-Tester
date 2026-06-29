@@ -123,6 +123,55 @@ function setNestedValue(obj: DraftObject, path: string, value: unknown): void {
   cur[parts[parts.length - 1]] = value || null;
 }
 
+function inputTypeForField(field: string): string {
+  if (field === "issue_date" || field === "due_date") return "date";
+  return "text";
+}
+
+function parseMoney(value: string): number | null {
+  const normalized = value.replace(/\s/g, "").replace(",", ".");
+  const match = normalized.match(/(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : null;
+}
+
+function parseItemsInput(value: string): Array<{ description: string; quantity: number; unit_price: number }> {
+  return value
+    .split(/\n|,/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const price = parseMoney(part);
+      const description = part
+        .replace(/\s*[-–—:]\s*\d[\d\s.,]*(?:[A-Za-z]{3})?\s*$/i, "")
+        .trim();
+      return {
+        description: description || part,
+        quantity: 1,
+        unit_price: price ?? 0,
+      };
+    });
+}
+
+function normalizeFormValue(path: string, value: string): unknown {
+  if (path === "items") return parseItemsInput(value);
+  return value;
+}
+
+function responseErrorMessage(data: Record<string, unknown>): string {
+  const detail = data.detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item !== "object" || item === null) return String(item);
+        const record = item as Record<string, unknown>;
+        const loc = Array.isArray(record.loc) ? record.loc.slice(2).join(".") : "field";
+        return `${loc}: ${String(record.msg ?? "Invalid value")}`;
+      })
+      .join("; ");
+  }
+  return String(data.message ?? detail ?? "Unexpected response");
+}
+
 function deepClone<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
@@ -336,7 +385,7 @@ function MissingFieldsForm({
             <div key={field}>
               <label className="block text-xs font-medium text-amber-800 mb-1">{fieldLabel(field)}</label>
               <input
-                type="text"
+                type={inputTypeForField(field)}
                 value={form.values[field] ?? ""}
                 onChange={(e) => onChange(field, e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && allFilled && !submitting && onSubmit()}
@@ -344,8 +393,26 @@ function MissingFieldsForm({
                 disabled={submitting}
                 className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50"
               />
+              {field === "items" && (
+                <p className="mt-1 text-[11px] text-amber-700">
+                  Example: Software development - 300 AMD, Maintenance - 10 AMD
+                </p>
+              )}
             </div>
           ))}
+
+          {!form.fields.includes("due_date") && (
+            <div>
+              <label className="block text-xs font-medium text-amber-800 mb-1">Due Date</label>
+              <input
+                type="date"
+                value={form.values.due_date ?? ""}
+                onChange={(e) => onChange("due_date", e.target.value)}
+                disabled={submitting}
+                className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50"
+              />
+            </div>
+          )}
         </div>
 
         <button
@@ -550,7 +617,7 @@ export default function App() {
       playError();
       addMsg({
         role: "error",
-        text: `Draft complete failed: ${String((data as Record<string, unknown>).message ?? (data as Record<string, unknown>).detail ?? "Unexpected response")}`,
+        text: `Draft complete failed: ${responseErrorMessage(data as Record<string, unknown>)}`,
         payload: { kind: "generic", raw: data },
       });
       return;
@@ -574,7 +641,7 @@ export default function App() {
     // Merge form values into draft using dot-path setter
     const merged = deepClone(pendingForm.draft);
     for (const [path, value] of Object.entries(pendingForm.values)) {
-      setNestedValue(merged, path, value);
+      setNestedValue(merged, path, normalizeFormValue(path, value));
     }
 
     // Mark form as submitted in UI
