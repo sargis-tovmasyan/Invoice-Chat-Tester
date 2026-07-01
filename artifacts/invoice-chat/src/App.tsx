@@ -1000,7 +1000,7 @@ export default function App() {
               <div className="text-sm font-semibold leading-tight">Document AI Tester</div>
               <div className="text-xs text-muted-foreground leading-tight truncate hidden sm:block">
                 {pendingForm && !pendingForm.submitted
-                  ? `⚠ Fill in: ${pendingForm.fields.join(", ")}`
+                  ? `⚠ Fill in: ${pendingForm.missingFields.join(", ")}`
                   : "Proxy → http://161.153.29.155:8000"}
               </div>
             </div>
