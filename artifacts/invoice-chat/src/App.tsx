@@ -174,32 +174,7 @@ function inputTypeForField(field: string): string {
   return "text";
 }
 
-function parseMoney(value: string): number | null {
-  const normalized = value.replace(/\s/g, "").replace(",", ".");
-  const match = normalized.match(/(\d+(?:\.\d+)?)/);
-  return match ? Number(match[1]) : null;
-}
-
-function parseItemsInput(value: string): Array<{ description: string; quantity: number; unit_price: number }> {
-  return value
-    .split(/\n|,/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const price = parseMoney(part);
-      const description = part
-        .replace(/\s*[-–—:]\s*\d[\d\s.,]*(?:[A-Za-z]{3})?\s*$/i, "")
-        .trim();
-      return {
-        description: description || part,
-        quantity: 1,
-        unit_price: price ?? 0,
-      };
-    });
-}
-
 function normalizeFormValue(path: string, value: string): unknown {
-  if (path === "items") return parseItemsInput(value);
   return value;
 }
 
@@ -208,7 +183,7 @@ function validateFormValues(values: Record<string, string>, missingFields: strin
   if (currency && !CURRENCY_OPTIONS.includes(currency)) {
     return "Currency must be one of USD, RUR, AMD, EUR.";
   }
-  if (missingFields.includes("items") && parseItemsInput(values.items ?? "").length === 0) {
+  if (missingFields.includes("items") && !(values.items ?? "").trim()) {
     return "Add at least one invoice item.";
   }
   return null;
@@ -791,7 +766,11 @@ export default function App() {
     // Merge form values into draft using dot-path setter
     const merged = deepClone(pendingForm.draft);
     for (const [path, value] of Object.entries(pendingForm.values)) {
-      setNestedValue(merged, path, normalizeFormValue(path, value));
+      if (path === "items") {
+        setNestedValue(merged, "raw_items", value);
+      } else {
+        setNestedValue(merged, path, normalizeFormValue(path, value));
+      }
     }
 
     // Mark form as submitted in UI
