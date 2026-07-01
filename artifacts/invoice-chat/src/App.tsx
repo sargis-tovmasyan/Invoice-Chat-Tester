@@ -20,6 +20,18 @@ const EXAMPLE_PROMPTS = [
   "Create invoice INV-001 from Sargis Studio for client Alex Johnson, issued 2026-06-28, due 2026-07-05, USD — website design $300",
 ];
 
+const INVOICE_FORM_FIELDS = [
+  "invoice_number",
+  "issue_date",
+  "due_date",
+  "currency",
+  "business.name",
+  "client.name",
+  "items",
+];
+
+const CURRENCY_OPTIONS = ["USD", "RUR", "AMD", "EUR"];
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type MessageRole = "user" | "assistant" | "system" | "error";
@@ -97,6 +109,7 @@ interface PendingForm {
   messageId: string;
   draft: DraftObject;
   fields: string[];
+  missingFields: string[];
   values: Record<string, string>;
   submitted: boolean;
 }
@@ -128,6 +141,32 @@ function setNestedValue(obj: DraftObject, path: string, value: unknown): void {
     cur = cur[parts[i]] as DraftObject;
   }
   cur[parts[parts.length - 1]] = value || null;
+}
+
+function getNestedValue(obj: DraftObject, path: string): unknown {
+  return path.split(".").reduce<unknown>((cur, part) => {
+    if (typeof cur !== "object" || cur === null) return undefined;
+    return (cur as DraftObject)[part];
+  }, obj);
+}
+
+function stringifyFormValue(draft: DraftObject, field: string): string {
+  const value = getNestedValue(draft, field);
+  if (field === "items" && Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item !== "object" || item === null) return "";
+        const record = item as Record<string, unknown>;
+        return `${String(record.description ?? "")} - ${String(record.unit_price ?? "")}`.trim();
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function buildInitialFormValues(draft: DraftObject, fields: string[]): Record<string, string> {
+  return Object.fromEntries(fields.map((field) => [field, stringifyFormValue(draft, field)]));
 }
 
 function inputTypeForField(field: string): string {
@@ -162,6 +201,17 @@ function parseItemsInput(value: string): Array<{ description: string; quantity: 
 function normalizeFormValue(path: string, value: string): unknown {
   if (path === "items") return parseItemsInput(value);
   return value;
+}
+
+function validateFormValues(values: Record<string, string>, missingFields: string[]): string | null {
+  const currency = values.currency?.trim();
+  if (currency && !CURRENCY_OPTIONS.includes(currency)) {
+    return "Currency must be one of USD, RUR, AMD, EUR.";
+  }
+  if (missingFields.includes("items") && parseItemsInput(values.items ?? "").length === 0) {
+    return "Add at least one invoice item.";
+  }
+  return null;
 }
 
 function responseErrorMessage(data: Record<string, unknown>): string {
@@ -373,7 +423,7 @@ function MissingFieldsForm({
     );
   }
 
-  const allFilled = form.fields.every((f) => (form.values[f] ?? "").trim() !== "");
+  const allFilled = form.missingFields.every((f) => (form.values[f] ?? "").trim() !== "");
 
   return (
     <div className="mt-3 w-full max-w-sm">
@@ -391,15 +441,38 @@ function MissingFieldsForm({
           {form.fields.map((field) => (
             <div key={field}>
               <label className="block text-xs font-medium text-amber-800 mb-1">{fieldLabel(field)}</label>
-              <input
-                type={inputTypeForField(field)}
-                value={form.values[field] ?? ""}
-                onChange={(e) => onChange(field, e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && allFilled && !submitting && onSubmit()}
-                placeholder={fieldLabel(field)}
-                disabled={submitting}
-                className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50"
-              />
+              {field === "currency" ? (
+                <select
+                  value={form.values[field] ?? ""}
+                  onChange={(e) => onChange(field, e.target.value)}
+                  disabled={submitting}
+                  className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50"
+                >
+                  <option value="">Select currency</option>
+                  {CURRENCY_OPTIONS.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
+                </select>
+              ) : field === "items" ? (
+                <textarea
+                  value={form.values[field] ?? ""}
+                  onChange={(e) => onChange(field, e.target.value)}
+                  placeholder="Software development - 300 AMD, Maintenance - 10 AMD"
+                  disabled={submitting}
+                  rows={3}
+                  className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50"
+                />
+              ) : (
+                <input
+                  type={inputTypeForField(field)}
+                  value={form.values[field] ?? ""}
+                  onChange={(e) => onChange(field, e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && allFilled && !submitting && onSubmit()}
+                  placeholder={fieldLabel(field)}
+                  disabled={submitting}
+                  className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50"
+                />
+              )}
               {field === "items" && (
                 <p className="mt-1 text-[11px] text-amber-700">
                   Example: Software development - 300 AMD, Maintenance - 10 AMD
@@ -407,19 +480,6 @@ function MissingFieldsForm({
               )}
             </div>
           ))}
-
-          {!form.fields.includes("due_date") && (
-            <div>
-              <label className="block text-xs font-medium text-amber-800 mb-1">Due Date</label>
-              <input
-                type="date"
-                value={form.values.due_date ?? ""}
-                onChange={(e) => onChange("due_date", e.target.value)}
-                disabled={submitting}
-                className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-50"
-              />
-            </div>
-          )}
         </div>
 
         <button
@@ -719,6 +779,12 @@ export default function App() {
 
   const handleFormSubmit = async () => {
     if (!pendingForm || formSubmitting) return;
+    const validationError = validateFormValues(pendingForm.values, pendingForm.missingFields);
+    if (validationError) {
+      playError();
+      addMsg({ role: "error", text: validationError });
+      return;
+    }
     playConfirm();
     setFormSubmitting(true);
 
@@ -829,7 +895,8 @@ export default function App() {
       // ── missing_fields ──
       if (status === "missing_fields") {
         const draft = chatData.draft ?? {};
-        const fields = chatData.missing_fields ?? [];
+        const missingFields = chatData.missing_fields ?? [];
+        const fields = INVOICE_FORM_FIELDS;
         const formMsgId = uid();
 
         playMissingFields();
@@ -844,7 +911,8 @@ export default function App() {
           messageId: formMsgId,
           draft,
           fields,
-          values: {},
+          missingFields,
+          values: buildInitialFormValues(draft, fields),
           submitted: false,
         });
         return;
