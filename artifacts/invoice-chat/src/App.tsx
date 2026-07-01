@@ -773,8 +773,10 @@ export default function App() {
       }
     }
 
-    // Mark form as submitted in UI
+    // Mark form as submitted in UI and show typing indicator
     setPendingForm((f) => f ? { ...f, submitted: true } : null);
+    setLoading(true);
+    setLoadingLabel("Creating your invoice…");
 
     try {
       await callComplete(merged);
@@ -782,6 +784,8 @@ export default function App() {
       addMsg({ role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
       setFormSubmitting(false);
+      setLoading(false);
+      setLoadingLabel("Thinking…");
       setPendingForm(null);
     }
   };
