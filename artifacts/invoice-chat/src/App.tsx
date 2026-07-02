@@ -13,6 +13,16 @@ import {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const PROXY_BASE = "/api/proxy";
+const DEFAULT_API_BASE = "http://161.153.29.155:8000";
+const LS_KEY = "invoice_ai_api_base";
+
+function getApiBase(): string {
+  try {
+    return localStorage.getItem(LS_KEY) ?? DEFAULT_API_BASE;
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+}
 
 const EXAMPLE_PROMPTS = [
   "Hi",
@@ -218,7 +228,7 @@ function pdfProxyUrl(pdfPath: string): string {
 async function apiPost<T>(path: string, body: unknown): Promise<{ data: T; ok: boolean; status: number }> {
   const resp = await fetch(`${PROXY_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Api-Base": getApiBase() },
     body: JSON.stringify(body),
   });
   const ct = resp.headers.get("content-type") ?? "";
@@ -227,13 +237,93 @@ async function apiPost<T>(path: string, body: unknown): Promise<{ data: T; ok: b
 }
 
 async function apiGet<T>(path: string): Promise<{ data: T; ok: boolean; status: number }> {
-  const resp = await fetch(`${PROXY_BASE}${path}`);
+  const resp = await fetch(`${PROXY_BASE}${path}`, {
+    headers: { "X-Api-Base": getApiBase() },
+  });
   const ct = resp.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await resp.json() : { raw_response: await resp.text() };
   return { data: data as T, ok: resp.ok, status: resp.status };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function SettingsPanel({ onClose, onSave }: { onClose: () => void; onSave: (base: string) => void }) {
+  const [value, setValue] = useState(() => getApiBase());
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => {
+    const trimmed = value.trim().replace(/\/$/, "") || DEFAULT_API_BASE;
+    try { localStorage.setItem(LS_KEY, trimmed); } catch { /* ignore */ }
+    onSave(trimmed);
+    setSaved(true);
+    setTimeout(() => { setSaved(false); onClose(); }, 900);
+  };
+
+  const handleReset = () => {
+    setValue(DEFAULT_API_BASE);
+    try { localStorage.removeItem(LS_KEY); } catch { /* ignore */ }
+    onSave(DEFAULT_API_BASE);
+  };
+
+  const isDefault = value.trim().replace(/\/$/, "") === DEFAULT_API_BASE;
+
+  return (
+    <div className="border-b border-border bg-background/95 backdrop-blur-sm shadow-sm">
+      <div className="max-w-3xl mx-auto px-4 py-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="text-sm font-semibold">Settings</div>
+            <div className="text-xs text-muted-foreground">Remembered in your browser — no account needed</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-accent transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">API Base URL</label>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSave()}
+              placeholder={DEFAULT_API_BASE}
+              className="flex-1 text-sm font-mono bg-muted/50 border border-border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-colors"
+            />
+            <button
+              onClick={handleSave}
+              disabled={saved}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-60 transition-all min-w-[72px]"
+            >
+              {saved ? (
+                <span className="flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  Saved
+                </span>
+              ) : "Save"}
+            </button>
+          </div>
+          {!isDefault && (
+            <button
+              onClick={handleReset}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Reset to default ({DEFAULT_API_BASE})
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function RawToggle({ raw, showRaw, onToggle }: { raw: unknown; showRaw: boolean; onToggle: () => void }) {
   return (
@@ -697,6 +787,8 @@ export default function App() {
   const [loadingLabel, setLoadingLabel] = useState("Thinking…");
   const [pendingForm, setPendingForm] = useState<PendingForm | null>(null);
   const [formSubmitting, setFormSubmitting] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [apiBase, setApiBase] = useState(() => getApiBase());
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -981,10 +1073,10 @@ export default function App() {
             </div>
             <div className="min-w-0">
               <div className="text-sm font-semibold leading-tight">Document AI Tester</div>
-              <div className="text-xs text-muted-foreground leading-tight truncate hidden sm:block">
+              <div className="text-xs text-muted-foreground leading-tight truncate hidden sm:block font-mono">
                 {pendingForm && !pendingForm.submitted
                   ? `⚠ Fill in: ${pendingForm.missingFields.join(", ")}`
-                  : "Proxy → http://161.153.29.155:8000"}
+                  : `→ ${apiBase}`}
               </div>
             </div>
           </div>
@@ -1006,9 +1098,27 @@ export default function App() {
                 Clear
               </button>
             )}
+            <button
+              onClick={() => setSettingsOpen((o) => !o)}
+              title="Settings"
+              className={`w-8 h-8 rounded-lg flex items-center justify-center border border-border transition-colors ${settingsOpen ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
           </div>
         </div>
       </header>
+
+      {/* ── Settings panel ── */}
+      {settingsOpen && (
+        <SettingsPanel
+          onClose={() => setSettingsOpen(false)}
+          onSave={(base) => setApiBase(base)}
+        />
+      )}
 
       {/* ── Chat ── */}
       <main className="flex-1 overflow-hidden flex flex-col min-h-0">

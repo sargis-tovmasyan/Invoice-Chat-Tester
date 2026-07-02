@@ -1,15 +1,22 @@
 import { Router, type IRouter } from "express";
 
-const VPS_BASE = "http://161.153.29.155:8000";
+const DEFAULT_VPS_BASE = "http://161.153.29.155:8000";
 
 const proxyRouter: IRouter = Router();
+
+function resolveBase(req: import("express").Request): string {
+  const header = req.headers["x-api-base"];
+  const val = Array.isArray(header) ? header[0] : header;
+  return (val && val.trim()) ? val.trim().replace(/\/$/, "") : DEFAULT_VPS_BASE;
+}
 
 async function vpsRequest(
   path: string,
   method: "GET" | "POST" | "PUT" | "DELETE",
   body?: unknown,
+  base?: string,
 ): Promise<Response> {
-  const url = `${VPS_BASE}${path}`;
+  const url = `${base ?? DEFAULT_VPS_BASE}${path}`;
   const opts: RequestInit = {
     method,
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -25,9 +32,10 @@ async function jsonProxy(
   method: "GET" | "POST",
   body: unknown,
   res: import("express").Response,
+  req: import("express").Request,
 ) {
   try {
-    const upstream = await vpsRequest(path, method, body);
+    const upstream = await vpsRequest(path, method, body, resolveBase(req));
     let data: unknown;
     const ct = upstream.headers.get("content-type") ?? "";
     if (ct.includes("application/json")) {
@@ -44,32 +52,32 @@ async function jsonProxy(
 
 // POST /api/proxy/extract  →  POST VPS /ai/invoice/extract
 proxyRouter.post("/extract", async (req, res) => {
-  await jsonProxy("/ai/invoice/extract", "POST", req.body, res);
+  await jsonProxy("/ai/invoice/extract", "POST", req.body, res, req);
 });
 
 // POST /api/proxy/chat  →  POST VPS /ai/chat
 proxyRouter.post("/chat", async (req, res) => {
-  await jsonProxy("/ai/chat", "POST", req.body, res);
+  await jsonProxy("/ai/chat", "POST", req.body, res, req);
 });
 
 // POST /api/proxy/complete  →  POST VPS /invoices/draft/complete
 proxyRouter.post("/complete", async (req, res) => {
-  await jsonProxy("/invoices/draft/complete", "POST", req.body, res);
+  await jsonProxy("/invoices/draft/complete", "POST", req.body, res, req);
 });
 
 // GET /api/proxy/health  →  GET VPS /health
-proxyRouter.get("/health", async (_req, res) => {
-  await jsonProxy("/health", "GET", undefined, res);
+proxyRouter.get("/health", async (req, res) => {
+  await jsonProxy("/health", "GET", undefined, res, req);
 });
 
 // POST /api/proxy/ai-test  →  POST VPS /ai/test
 proxyRouter.post("/ai-test", async (req, res) => {
-  await jsonProxy("/ai/test", "POST", req.body, res);
+  await jsonProxy("/ai/test", "POST", req.body, res, req);
 });
 
 // GET /api/proxy/invoices  →  GET VPS /invoices
-proxyRouter.get("/invoices", async (_req, res) => {
-  await jsonProxy("/invoices", "GET", undefined, res);
+proxyRouter.get("/invoices", async (req, res) => {
+  await jsonProxy("/invoices", "GET", undefined, res, req);
 });
 
 // GET /api/proxy/pdf?path=/invoices/.../pdf
@@ -77,18 +85,19 @@ proxyRouter.get("/invoices", async (_req, res) => {
 proxyRouter.get("/pdf", async (req, res) => {
   const pdfPath = req.query["path"] as string | undefined;
   const fullUrl = req.query["url"] as string | undefined;
+  const base = resolveBase(req);
 
   let target: string;
   if (fullUrl) {
-    // Accept a full VPS URL — rewrite to use VPS_BASE so we always go through server
+    // Accept a full VPS URL — rewrite to use resolved base so we always go through server
     try {
       const parsed = new URL(fullUrl);
-      target = `${VPS_BASE}${parsed.pathname}${parsed.search}`;
+      target = `${base}${parsed.pathname}${parsed.search}`;
     } catch {
       target = fullUrl;
     }
   } else if (pdfPath) {
-    target = `${VPS_BASE}${pdfPath.startsWith("/") ? "" : "/"}${pdfPath}`;
+    target = `${base}${pdfPath.startsWith("/") ? "" : "/"}${pdfPath}`;
   } else {
     res.status(400).json({ error: "Provide ?path= or ?url= query parameter" });
     return;
