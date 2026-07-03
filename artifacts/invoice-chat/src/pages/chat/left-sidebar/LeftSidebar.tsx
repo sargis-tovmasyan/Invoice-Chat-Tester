@@ -9,7 +9,7 @@ interface LeftSidebarProps {
   onSelectSession: (sessionId: string) => void;
   onRenameSession: (sessionId: string, title: string) => void;
   onArchiveSession: (sessionId: string) => void;
-  onDeleteSession: (sessionId: string) => void;
+  onRemoveSession: (sessionId: string) => void;
 }
 
 export function LeftSidebar(props: LeftSidebarProps) {
@@ -29,10 +29,10 @@ export function LeftSidebar(props: LeftSidebarProps) {
         <NewChatButton onClick={props.onNewChat} />
       </div>
       <div className="chat-scroll min-h-0 flex-1 overflow-y-auto p-3">
-        <ChatSessionList title="Chats" emptyText="No active chats" sessions={activeSessions} activeSessionId={props.activeSessionId} onSelectSession={props.onSelectSession} onRenameSession={props.onRenameSession} onArchiveSession={props.onArchiveSession} onDeleteSession={props.onDeleteSession} />
+        <ChatSessionList title="Chats" emptyText="No active chats" sessions={activeSessions} activeSessionId={props.activeSessionId} onSelectSession={props.onSelectSession} onRenameSession={props.onRenameSession} onArchiveSession={props.onArchiveSession} onRemoveSession={props.onRemoveSession} />
         {archivedSessions.length > 0 && (
           <div className="mt-6">
-            <ChatSessionList title="Archived" emptyText="No archived chats" sessions={archivedSessions} activeSessionId={props.activeSessionId} archived onSelectSession={props.onSelectSession} onRenameSession={props.onRenameSession} onArchiveSession={props.onArchiveSession} onDeleteSession={props.onDeleteSession} />
+            <ChatSessionList title="Archived" emptyText="No archived chats" sessions={archivedSessions} activeSessionId={props.activeSessionId} archived onSelectSession={props.onSelectSession} onRenameSession={props.onRenameSession} onArchiveSession={props.onArchiveSession} onRemoveSession={props.onRemoveSession} />
           </div>
         )}
       </div>
