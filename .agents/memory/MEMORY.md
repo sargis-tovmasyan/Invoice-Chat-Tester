@@ -1,0 +1,1 @@
+- [Beginner-friendly UI restructuring](ui-folder-by-feature.md) — when the user is non-technical, organize files by visible UI area, not by technical layer.
