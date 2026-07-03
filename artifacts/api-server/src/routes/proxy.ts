@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 
-const VPS_BASE = "http://161.153.29.155:8000";
+const DEFAULT_BACKEND_BASE = "http://161.153.29.155:8000";
+const VPS_BASE = (process.env.DOCUMENT_API_BASE_URL ?? process.env.VPS_BASE_URL ?? DEFAULT_BACKEND_BASE).replace(/\/$/, "");
 
 const proxyRouter: IRouter = Router();
 
@@ -22,7 +23,7 @@ async function vpsRequest(
 
 async function jsonProxy(
   path: string,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   body: unknown,
   res: import("express").Response,
 ) {
@@ -42,45 +43,36 @@ async function jsonProxy(
   }
 }
 
-// POST /api/proxy/extract  →  POST VPS /ai/invoice/extract
 proxyRouter.post("/extract", async (req, res) => {
   await jsonProxy("/ai/invoice/extract", "POST", req.body, res);
 });
 
-// POST /api/proxy/chat  →  POST VPS /ai/chat
 proxyRouter.post("/chat", async (req, res) => {
   await jsonProxy("/ai/chat", "POST", req.body, res);
 });
 
-// POST /api/proxy/complete  →  POST VPS /invoices/draft/complete
 proxyRouter.post("/complete", async (req, res) => {
   await jsonProxy("/invoices/draft/complete", "POST", req.body, res);
 });
 
-// GET /api/proxy/health  →  GET VPS /health
 proxyRouter.get("/health", async (_req, res) => {
   await jsonProxy("/health", "GET", undefined, res);
 });
 
-// POST /api/proxy/ai-test  →  POST VPS /ai/test
-proxyRouter.post("/ai-test", async (req, res) => {
-  await jsonProxy("/ai/test", "POST", req.body, res);
-});
-
-// GET /api/proxy/invoices  →  GET VPS /invoices
 proxyRouter.get("/invoices", async (_req, res) => {
   await jsonProxy("/invoices", "GET", undefined, res);
 });
 
-// GET /api/proxy/pdf?path=/invoices/.../pdf
-// Streams binary PDF through the proxy so the browser never opens an HTTP URL directly.
+proxyRouter.delete("/invoices", async (_req, res) => {
+  await jsonProxy("/invoices", "DELETE", undefined, res);
+});
+
 proxyRouter.get("/pdf", async (req, res) => {
   const pdfPath = req.query["path"] as string | undefined;
   const fullUrl = req.query["url"] as string | undefined;
 
   let target: string;
   if (fullUrl) {
-    // Accept a full VPS URL — rewrite to use VPS_BASE so we always go through server
     try {
       const parsed = new URL(fullUrl);
       target = `${VPS_BASE}${parsed.pathname}${parsed.search}`;
@@ -97,9 +89,7 @@ proxyRouter.get("/pdf", async (req, res) => {
   try {
     const upstream = await fetch(target);
     const ct = upstream.headers.get("content-type") ?? "application/pdf";
-    const cd =
-      upstream.headers.get("content-disposition") ??
-      'inline; filename="invoice.pdf"';
+    const cd = upstream.headers.get("content-disposition") ?? 'inline; filename="invoice.pdf"';
     res.setHeader("Content-Type", ct);
     res.setHeader("Content-Disposition", cd);
 
