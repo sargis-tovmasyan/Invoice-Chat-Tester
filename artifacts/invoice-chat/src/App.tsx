@@ -102,21 +102,36 @@ export default function App() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createEmptySession()]);
   const [activeSessionId, setActiveSessionId] = useState<string>(() => sessions[0].id);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [threadsLoading, setThreadsLoading] = useState(true);
+  const [loadingBySession, setLoadingBySession] = useState<Record<string, string>>({});
+  const [formSubmittingSessionId, setFormSubmittingSessionId] = useState<string | null>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0];
   const messages = activeSession.messages;
   const pendingForm = activeSession.pendingForm;
+  const activeLoadingLabel = loadingBySession[activeSessionId];
+  const activeSessionLoading = Boolean(activeLoadingLabel);
+  const activeFormSubmitting = formSubmittingSessionId === activeSessionId;
 
-  // ── Composer / request state (shared across the active session) ──────────
+  // ── Composer / request state ──────────────────────────────────────────────
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [loadingLabel, setLoadingLabel] = useState("Thinking…");
-  const [formSubmitting, setFormSubmitting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiBase, setApiBase] = useState(() => getApiBase());
   const [configured, setConfigured] = useState(() => isApiBaseConfigured());
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const setSessionLoading = useCallback((sessionId: string, label: string) => {
+    setLoadingBySession((current) => ({ ...current, [sessionId]: label }));
+  }, []);
+
+  const clearSessionLoading = useCallback((sessionId: string) => {
+    setLoadingBySession((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+  }, []);
 
   // Unlock AudioContext on first interaction (browser requirement)
   useEffect(() => {
@@ -166,26 +181,30 @@ export default function App() {
   );
 
   const refreshThreads = useCallback(async () => {
-    const { data, ok } = await getChatThreads();
-    if (!ok || !Array.isArray(data)) return;
-    const loadedSessions = data.map(sessionFromThread);
+    try {
+      const { data, ok } = await getChatThreads();
+      if (!ok || !Array.isArray(data)) return;
+      const loadedSessions = data.map(sessionFromThread);
 
-    setSessions((current) => {
-      const mergedLoaded = loadedSessions.map((loaded) => {
-        const local = current.find((session) => session.id === loaded.id || session.backendChatId === loaded.backendChatId);
-        return mergeLoadedSession(local, loaded);
+      setSessions((current) => {
+        const mergedLoaded = loadedSessions.map((loaded) => {
+          const local = current.find((session) => session.id === loaded.id || session.backendChatId === loaded.backendChatId);
+          return mergeLoadedSession(local, loaded);
+        });
+
+        const loadedIds = new Set(mergedLoaded.flatMap((session) => [session.id, session.backendChatId].filter(Boolean) as string[]));
+        const localOnly = current.filter(
+          (session) =>
+            !loadedIds.has(session.id) &&
+            (!session.backendChatId || !loadedIds.has(session.backendChatId)) &&
+            (session.messages.length > 0 || session.id === activeSessionId),
+        );
+
+        return [...localOnly, ...mergedLoaded];
       });
-
-      const loadedIds = new Set(mergedLoaded.flatMap((session) => [session.id, session.backendChatId].filter(Boolean) as string[]));
-      const localOnly = current.filter(
-        (session) =>
-          !loadedIds.has(session.id) &&
-          (!session.backendChatId || !loadedIds.has(session.backendChatId)) &&
-          (session.messages.length > 0 || session.id === activeSessionId),
-      );
-
-      return [...localOnly, ...mergedLoaded];
-    });
+    } finally {
+      setThreadsLoading(false);
+    }
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -214,7 +233,6 @@ export default function App() {
   // ── Call /invoices/draft/complete ─────────────────────────────────────────
 
   const callComplete = useCallback(async (sessionId: string, draft: DraftObject) => {
-    setLoadingLabel("Creating invoice…");
     const session = sessions.find((item) => item.id === sessionId);
     const { data, ok } = await completeInvoiceDraft(draft, session?.backendChatId) as { data: CompleteResponse & { chat_id?: string }; ok: boolean };
 
@@ -246,7 +264,7 @@ export default function App() {
   // ── Handle missing fields form submit ─────────────────────────────────────
 
   const handleFormSubmit = async () => {
-    if (!pendingForm || formSubmitting) return;
+    if (!pendingForm || activeFormSubmitting) return;
     const sessionId = activeSessionId;
     const validationError = validateFormValues(pendingForm.values, pendingForm.missingFields);
     if (validationError) {
@@ -255,7 +273,7 @@ export default function App() {
       return;
     }
     playConfirm();
-    setFormSubmitting(true);
+    setFormSubmittingSessionId(sessionId);
 
     const merged = deepClone(pendingForm.draft);
     for (const [path, value] of Object.entries(pendingForm.values)) {
@@ -267,17 +285,16 @@ export default function App() {
     }
 
     setPendingFormForActive((f) => (f ? { ...f, submitted: true } : null));
-    setLoading(true);
-    setLoadingLabel("Creating your invoice…");
+    setSessionLoading(sessionId, "Creating your invoice…");
 
     try {
       await callComplete(sessionId, merged);
     } catch (err) {
+      playError();
       addMsg(sessionId, { role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
-      setFormSubmitting(false);
-      setLoading(false);
-      setLoadingLabel("Thinking…");
+      setFormSubmittingSessionId((current) => (current === sessionId ? null : current));
+      clearSessionLoading(sessionId);
       setPendingFormForActive(null);
     }
   };
@@ -290,7 +307,7 @@ export default function App() {
 
   const sendMessage = async (preset?: string) => {
     const text = (preset ?? input).trim();
-    if (!text || loading || pendingForm !== null) return;
+    if (!text || activeSessionLoading || pendingForm !== null) return;
     const sessionId = activeSessionId;
     const session = sessions.find((item) => item.id === sessionId);
     const requestBody = session?.backendChatId ? { message: text, chat_id: session.backendChatId } : { message: text };
@@ -298,8 +315,7 @@ export default function App() {
 
     playSend();
     addMsg(sessionId, { role: "user", text, requestInfo: { method: "POST", endpoint: `${PROXY_BASE}/chat`, body: requestBody } });
-    setLoading(true);
-    setLoadingLabel("Thinking…");
+    setSessionLoading(sessionId, "Thinking…");
 
     try {
       const { data: chatData, ok } = await sendChatMessage(text, session?.backendChatId) as { data: ChatResponse; ok: boolean };
@@ -401,26 +417,24 @@ export default function App() {
       playReceive();
       addMsg(sessionId, {
         role: "assistant",
-        text: `Received status "${status ?? "unknown"}" from the API.`,
+        text: `Received status "${status ?? "unknown"}" from the API.",
         payload: { kind: "generic", raw: chatData },
       });
     } catch (err) {
       playError();
       addMsg(sessionId, { role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
-      setLoading(false);
-      setLoadingLabel("Thinking…");
+      clearSessionLoading(sessionId);
     }
   };
 
   // ── Quick actions (Health / Invoices buttons) ─────────────────────────────
 
   const runAction = async (label: string, fn: () => Promise<{ data: unknown }>) => {
-    if (loading || pendingForm !== null) return;
+    if (activeSessionLoading || pendingForm !== null) return;
     const sessionId = activeSessionId;
     addMsg(sessionId, { role: "system", text: `▶ ${label}` });
-    setLoading(true);
-    setLoadingLabel(`${label}…`);
+    setSessionLoading(sessionId, `${label}…`);
     try {
       const { data } = await fn();
       playPing();
@@ -443,8 +457,7 @@ export default function App() {
       playError();
       addMsg(sessionId, { role: "error", text: `${label} failed: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
-      setLoading(false);
-      setLoadingLabel("Thinking…");
+      clearSessionLoading(sessionId);
     }
   };
 
@@ -452,7 +465,7 @@ export default function App() {
     updateSession(activeSessionId, (s) => ({ ...s, messages: [], pendingForm: null }));
   };
 
-  const isBlocked = loading || pendingForm !== null;
+  const isBlocked = activeSessionLoading || pendingForm !== null;
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -476,6 +489,7 @@ export default function App() {
         onSelectSession={handleSelectSession}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}
+        isLoadingChats={threadsLoading}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -502,10 +516,10 @@ export default function App() {
         <main className="flex-1 overflow-hidden flex flex-col min-h-0">
           <ConversationArea
             messages={messages}
-            loading={loading}
-            loadingLabel={loadingLabel}
+            loading={activeSessionLoading}
+            loadingLabel={activeLoadingLabel ?? "Thinking…"}
             pendingForm={pendingForm}
-            formSubmitting={formSubmitting}
+            formSubmitting={activeFormSubmitting}
             onSendExample={(p) => sendMessage(p)}
             onToggleRaw={toggleRaw}
             onFormChange={handleFormChange}
@@ -516,7 +530,7 @@ export default function App() {
             input={input}
             onInputChange={setInput}
             onSend={sendMessage}
-            loading={loading}
+            loading={activeSessionLoading}
             isBlocked={isBlocked}
             hasPendingForm={pendingForm !== null && !pendingForm.submitted}
             hasMessages={messages.length > 0}
