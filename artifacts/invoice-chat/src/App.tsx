@@ -295,7 +295,7 @@ export default function App() {
     } finally {
       setFormSubmittingSessionId((current) => (current === sessionId ? null : current));
       clearSessionLoading(sessionId);
-      setPendingFormForActive(null);
+      updateSession(sessionId, (s) => ({ ...s, pendingForm: null }));
     }
   };
 
@@ -417,7 +417,7 @@ export default function App() {
       playReceive();
       addMsg(sessionId, {
         role: "assistant",
-        text: `Received status "${status ?? "unknown"}" from the API.",
+        text: `Received status "${status ?? "unknown"}" from the API.`,
         payload: { kind: "generic", raw: chatData },
       });
     } catch (err) {
