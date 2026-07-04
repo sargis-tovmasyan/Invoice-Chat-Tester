@@ -86,15 +86,5 @@ export async function getChatThread(chatId: string) {
 }
 
 export async function getChatThreads() {
-  const result = await apiGet<ChatThread[]>("/chat-threads");
-  if (!result.ok || !Array.isArray(result.data) || result.data.length === 0) return result;
-
-  const hydratedThreads = await Promise.all(
-    result.data.map(async (thread) => {
-      const detail = await getChatThread(thread.id);
-      return detail.ok ? detail.data : thread;
-    }),
-  );
-
-  return { ...result, data: hydratedThreads };
+  return apiGet<ChatThread[]>("/chat-threads");
 }
