@@ -23,6 +23,7 @@ export function Sidebar({
   const [archivedIds, setArchivedIds] = useState<Set<string>>(() => new Set());
   const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
   const [showArchived, setShowArchived] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !removedIds.has(session.id) && !archivedIds.has(session.id)),
@@ -52,6 +53,7 @@ export function Sidebar({
   };
 
   const renameSession = (session: ChatSession) => {
+    setOpenMenuId(null);
     const nextTitle = window.prompt("Rename chat", displayTitle(session));
     if (nextTitle === null) return;
 
@@ -65,11 +67,13 @@ export function Sidebar({
   };
 
   const archiveSession = (session: ChatSession) => {
+    setOpenMenuId(null);
     setArchivedIds((current) => new Set(current).add(session.id));
     selectFallbackSession(session.id);
   };
 
   const restoreSession = (session: ChatSession) => {
+    setOpenMenuId(null);
     setArchivedIds((current) => {
       const next = new Set(current);
       next.delete(session.id);
@@ -79,8 +83,13 @@ export function Sidebar({
   };
 
   const removeSession = (session: ChatSession) => {
+    setOpenMenuId(null);
     setRemovedIds((current) => new Set(current).add(session.id));
     selectFallbackSession(session.id);
+  };
+
+  const toggleMenu = (sessionId: string) => {
+    setOpenMenuId((current) => (current === sessionId ? null : sessionId));
   };
 
   if (collapsed) {
@@ -135,35 +144,80 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto chat-scroll px-2 pb-3 space-y-1">
+      <div className="flex-1 overflow-y-auto chat-scroll pl-2 pr-0 pb-3 space-y-1">
         {visibleSessions.map((session) => {
           const isActive = session.id === activeSessionId;
           return (
             <div
               key={session.id}
-              className={`group rounded-lg transition-colors ${isActive ? "bg-primary/10" : "hover:bg-accent"}`}
+              className={`relative group mr-2 rounded-xl transition-colors ${
+                isActive
+                  ? "mr-0 rounded-r-none border-y border-l border-border bg-background shadow-sm"
+                  : "bg-card/60 hover:bg-accent/80 border border-transparent"
+              }`}
             >
-              <button
-                onClick={() => onSelectSession(session.id)}
-                className={`w-full text-left px-3 pt-2 text-sm truncate ${
-                  isActive ? "text-primary font-medium" : "text-foreground/80"
-                }`}
-                title={displayTitle(session)}
-              >
-                {displayTitle(session)}
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onSelectSession(session.id)}
+                  className={`min-w-0 flex-1 text-left px-3 py-2.5 text-sm truncate ${
+                    isActive ? "text-foreground font-semibold" : "text-foreground/80"
+                  }`}
+                  title={displayTitle(session)}
+                >
+                  {displayTitle(session)}
+                </button>
 
-              <div className="flex gap-1 px-2 pb-2 pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => renameSession(session)} className="text-[11px] text-muted-foreground hover:text-foreground">Rename</button>
-                <button onClick={() => archiveSession(session)} className="text-[11px] text-muted-foreground hover:text-foreground">Archive</button>
-                <button onClick={() => removeSession(session)} className="text-[11px] text-destructive hover:underline">Remove</button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleMenu(session.id);
+                  }}
+                  className={`mr-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-background hover:text-foreground ${
+                    openMenuId === session.id ? "bg-background text-foreground" : "opacity-70 group-hover:opacity-100"
+                  }`}
+                  title="Chat actions"
+                  aria-label="Chat actions"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <circle cx="12" cy="5" r="1.8" />
+                    <circle cx="12" cy="12" r="1.8" />
+                    <circle cx="12" cy="19" r="1.8" />
+                  </svg>
+                </button>
               </div>
+
+              {openMenuId === session.id && (
+                <div className="absolute right-2 top-10 z-20 w-36 overflow-hidden rounded-xl border border-border bg-popover shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => renameSession(session)}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => archiveSession(session)}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
+                  >
+                    Archive
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeSession(session)}
+                    className="block w-full px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
 
         {archivedSessions.length > 0 && (
-          <div className="pt-3">
+          <div className="pt-3 pr-2">
             <button
               type="button"
               onClick={() => setShowArchived((value) => !value)}
@@ -173,7 +227,7 @@ export function Sidebar({
             </button>
 
             {showArchived && archivedSessions.map((session) => (
-              <div key={session.id} className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent">
+              <div key={session.id} className="relative rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent">
                 <button onClick={() => restoreSession(session)} className="block w-full truncate text-left" title={displayTitle(session)}>
                   {displayTitle(session)}
                 </button>
