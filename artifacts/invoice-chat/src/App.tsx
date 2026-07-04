@@ -3,7 +3,7 @@
 // Composer. Owns the session list and all the chat/network logic; every
 // visible area is its own component under src/components/.
 //
-// Sessions are frontend-only and in-memory — see src/session/sessionHelpers.ts.
+// Sessions are loaded from backend chat threads when available.
 // API calls live in src/api/client.ts. Everything else (types, constants,
 // helpers) is split out so each concern has one obvious home.
 
@@ -11,7 +11,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { unlockAudio, playSend, playReceive, playSuccess, playError, playMissingFields, playConfirm, playPing } from "./lib/sounds";
 import { PROXY_BASE, INVOICE_FORM_FIELDS } from "./lib/constants";
 import { uid, deepClone, setNestedValue, normalizeFormValue, validateFormValues, buildInitialFormValues, responseErrorMessage, deriveSessionTitle } from "./lib/helpers";
-import { apiGet, sendChatMessage, completeInvoiceDraft, getApiBase, isApiBaseConfigured } from "./api/client";
+import { apiGet, sendChatMessage, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread } from "./api/client";
 import { createEmptySession } from "./session/sessionHelpers";
 
 import { Sidebar } from "./components/Sidebar/Sidebar";
@@ -21,7 +21,66 @@ import { Composer } from "./components/Composer/Composer";
 import { SettingsPanel } from "./components/Settings/SettingsPanel";
 import { SetupScreen } from "./components/Settings/SetupScreen";
 
-import type { ChatSession, Message, PendingForm, DraftObject, CompleteResponse, ChatResponse, InvoiceListItem } from "./types";
+import type { ChatSession, Message, PendingForm, DraftObject, CompleteResponse, ChatResponse, InvoiceListItem, ParsedPayload, StoredChatMessage, ChatThread } from "./types";
+
+function parseStoredPayload(raw: unknown): ParsedPayload | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const record = raw as ChatResponse;
+  if (record.status === "invoice_list") {
+    return { kind: "invoice_list", invoices: record.invoices ?? [], raw };
+  }
+  if (record.status === "missing_fields") {
+    return { kind: "missing_fields", fields: INVOICE_FORM_FIELDS, draft: record.draft ?? {}, raw };
+  }
+  if (record.status === "created" || record.invoice_id) {
+    return { kind: "invoice", data: record, raw };
+  }
+  if (record.status === "ai_parse_error" || record.status === "llm_unavailable") {
+    return { kind: "error_status", message: record.message ?? "", status: record.status, raw };
+  }
+  return undefined;
+}
+
+function storedMessageToUi(message: StoredChatMessage): Message {
+  const timestamp = message.created_at ? new Date(message.created_at).getTime() : Date.now();
+  return {
+    id: message.id,
+    role: message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : "system",
+    text: message.content,
+    timestamp: Number.isNaN(timestamp) ? Date.now() : timestamp,
+    payload: parseStoredPayload(message.metadata ?? {}),
+    showRaw: false,
+  };
+}
+
+function sessionFromThread(thread: ChatThread): ChatSession {
+  const messages = (thread.messages ?? []).map(storedMessageToUi);
+  const session: ChatSession = {
+    id: thread.id,
+    backendChatId: thread.id,
+    title: thread.title || "New chat",
+    messages,
+    pendingForm: null,
+    createdAt: thread.created_at ? new Date(thread.created_at).getTime() : Date.now(),
+  };
+
+  const draft = thread.session_memory?.draft;
+  const missingFields = thread.session_memory?.missing_fields ?? [];
+  const lastMissingMessage = [...messages].reverse().find((message) => message.payload?.kind === "missing_fields");
+  if (draft && missingFields.length > 0 && lastMissingMessage) {
+    session.pendingForm = {
+      messageId: lastMissingMessage.id,
+      chatId: thread.id,
+      draft,
+      fields: INVOICE_FORM_FIELDS,
+      missingFields,
+      values: buildInitialFormValues(draft, INVOICE_FORM_FIELDS),
+      submitted: false,
+    };
+  }
+
+  return session;
+}
 
 export default function App() {
   // ── Sessions (sidebar) ────────────────────────────────────────────────────
@@ -91,6 +150,25 @@ export default function App() {
     [updateSession, activeSessionId]
   );
 
+  const refreshThreads = useCallback(async () => {
+    const { data, ok } = await getChatThreads();
+    if (!ok || !Array.isArray(data)) return;
+    const loadedSessions = data.map(sessionFromThread);
+    if (loadedSessions.length === 0) return;
+    setSessions((current) => {
+      const unsaved = current.filter((session) => !session.backendChatId && session.messages.length > 0);
+      return [...loadedSessions, ...unsaved];
+    });
+    setActiveSessionId((current) => {
+      const stillExists = loadedSessions.some((session) => session.id === current);
+      return stillExists ? current : loadedSessions[0].id;
+    });
+  }, []);
+
+  useEffect(() => {
+    void refreshThreads();
+  }, [refreshThreads]);
+
   const handleNewChat = () => {
     const session = createEmptySession();
     setSessions((prev) => [session, ...prev]);
@@ -98,16 +176,24 @@ export default function App() {
     setInput("");
   };
 
-  const handleSelectSession = (id: string) => {
+  const handleSelectSession = async (id: string) => {
     setActiveSessionId(id);
     setInput("");
+    const session = sessions.find((item) => item.id === id);
+    if (!session?.backendChatId) return;
+    const { data, ok } = await getChatThread(session.backendChatId);
+    if (ok) {
+      const loadedSession = sessionFromThread(data);
+      setSessions((current) => current.map((item) => (item.id === id ? loadedSession : item)));
+    }
   };
 
   // ── Call /invoices/draft/complete ─────────────────────────────────────────
 
   const callComplete = useCallback(async (sessionId: string, draft: DraftObject) => {
     setLoadingLabel("Creating invoice…");
-    const { data, ok } = await completeInvoiceDraft(draft) as { data: CompleteResponse; ok: boolean };
+    const session = sessions.find((item) => item.id === sessionId);
+    const { data, ok } = await completeInvoiceDraft(draft, session?.backendChatId) as { data: CompleteResponse; ok: boolean };
 
     if (!ok || (data.status && data.status !== "created" && !data.invoice_id)) {
       playError();
@@ -125,7 +211,8 @@ export default function App() {
       text: `Invoice created — ${data.invoice_number ?? `#${data.invoice_id}`}`,
       payload: { kind: "invoice", data, raw: data },
     });
-  }, [addMsg]);
+    await refreshThreads();
+  }, [addMsg, refreshThreads, sessions]);
 
   // ── Handle missing fields form submit ─────────────────────────────────────
 
@@ -176,15 +263,17 @@ export default function App() {
     const text = (preset ?? input).trim();
     if (!text || loading || pendingForm !== null) return;
     const sessionId = activeSessionId;
+    const session = sessions.find((item) => item.id === sessionId);
+    const requestBody = session?.backendChatId ? { message: text, chat_id: session.backendChatId } : { message: text };
     if (!preset) setInput("");
 
     playSend();
-    addMsg(sessionId, { role: "user", text, requestInfo: { method: "POST", endpoint: `${PROXY_BASE}/chat`, body: { message: text } } });
+    addMsg(sessionId, { role: "user", text, requestInfo: { method: "POST", endpoint: `${PROXY_BASE}/chat`, body: requestBody } });
     setLoading(true);
     setLoadingLabel("Thinking…");
 
     try {
-      const { data: chatData, ok } = await sendChatMessage(text) as { data: ChatResponse; ok: boolean };
+      const { data: chatData, ok } = await sendChatMessage(text, session?.backendChatId) as { data: ChatResponse; ok: boolean };
 
       if (!ok) {
         playError();
@@ -197,6 +286,12 @@ export default function App() {
       }
 
       const status = chatData.status;
+      if (chatData.chat_id) {
+        updateSession(sessionId, (current) => ({
+          ...current,
+          backendChatId: chatData.chat_id,
+        }));
+      }
 
       if (status === "answer") {
         playReceive();
@@ -262,6 +357,7 @@ export default function App() {
           ...s,
           pendingForm: {
             messageId: formMsgId,
+            chatId: chatData.chat_id ?? session?.backendChatId,
             draft,
             fields,
             missingFields,
@@ -283,6 +379,7 @@ export default function App() {
       playError();
       addMsg(sessionId, { role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
+      void refreshThreads();
       setLoading(false);
       setLoadingLabel("Thinking…");
     }

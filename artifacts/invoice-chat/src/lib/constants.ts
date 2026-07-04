@@ -6,7 +6,7 @@
 export const PROXY_BASE = "/api/proxy";
 
 // Used the first time the app runs, before the user has set their own URL.
-export const DEFAULT_API_BASE = "http://161.153.29.155:8000";
+export const DEFAULT_API_BASE = "http://129.146.79.201:8000";
 
 // localStorage key where the user's chosen API Base URL is remembered.
 export const LS_KEY = "invoice_ai_api_base";

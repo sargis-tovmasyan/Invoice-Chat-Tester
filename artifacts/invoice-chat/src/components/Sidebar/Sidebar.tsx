@@ -1,7 +1,5 @@
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
-// Left column: "New Chat" button + the list of in-memory chat sessions.
-// Purely frontend state for now. Persistent history will be implemented later
-// with backend memory/chat threads.
+// Left column: "New Chat" button + the list of chat sessions.
 
 import { useMemo, useState } from "react";
 import type { ChatSession } from "../../types";

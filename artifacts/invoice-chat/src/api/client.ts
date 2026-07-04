@@ -65,11 +65,25 @@ export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
 
 // The one call this whole app is built around: POST {API_BASE_URL}/ai/chat
 // (proxied as POST {PROXY_BASE}/chat -> the real API's /ai/chat route).
-export async function sendChatMessage(message: string) {
-  return apiPost<import("../types").ChatResponse>("/chat", { message });
+export async function sendChatMessage(message: string, chatId?: string) {
+  return apiPost<import("../types").ChatResponse>(
+    "/chat",
+    chatId ? { message, chat_id: chatId } : { message },
+  );
 }
 
 // Used after a "missing_fields" response once the user fills in the form.
-export async function completeInvoiceDraft(draft: unknown) {
-  return apiPost<import("../types").CompleteResponse>("/complete", { draft });
+export async function completeInvoiceDraft(draft: unknown, chatId?: string) {
+  return apiPost<import("../types").CompleteResponse>(
+    "/complete",
+    chatId ? { draft, chat_id: chatId } : { draft },
+  );
+}
+
+export async function getChatThreads() {
+  return apiGet<import("../types").ChatThread[]>("/chat-threads");
+}
+
+export async function getChatThread(chatId: string) {
+  return apiGet<import("../types").ChatThread>(`/chat-threads/${encodeURIComponent(chatId)}`);
 }

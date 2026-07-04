@@ -44,10 +44,31 @@ export interface InvoiceListItem {
 
 export interface ChatResponse extends CompleteResponse {
   status: ChatStatus;
+  chat_id?: string;
   message?: string;
   invoices?: InvoiceListItem[];
   missing_fields?: string[];
   draft?: DraftObject;
+}
+
+export interface StoredChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface ChatThread {
+  id: string;
+  title?: string;
+  updated_at?: string;
+  created_at?: string;
+  messages?: StoredChatMessage[];
+  session_memory?: {
+    draft?: DraftObject;
+    missing_fields?: string[];
+  };
 }
 
 // The "payload" is whatever extra content renders below an assistant message —
@@ -77,6 +98,7 @@ export interface Message {
 
 export interface PendingForm {
   messageId: string;
+  chatId?: string;
   draft: DraftObject;
   fields: string[];
   missingFields: string[];
@@ -88,6 +110,7 @@ export interface PendingForm {
 // the page starts fresh, on purpose (no backend history/persistence).
 export interface ChatSession {
   id: string;
+  backendChatId?: string;
   title: string;
   messages: Message[];
   pendingForm: PendingForm | null;

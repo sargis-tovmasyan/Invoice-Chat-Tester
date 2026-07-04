@@ -1,6 +1,6 @@
 // ─── Chat session helpers ───────────────────────────────────────────────────
-// Sessions are the sidebar's "chats". They live only in React state (no
-// localStorage, no backend) — refreshing the page starts over, on purpose.
+// Sessions are the sidebar's "chats". New chats start locally, then attach to
+// backend chat threads after the first successful /ai/chat response.
 
 import { uid } from "../lib/helpers";
 import type { ChatSession } from "../types";

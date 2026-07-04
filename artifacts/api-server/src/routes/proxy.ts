@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 
-const DEFAULT_VPS_BASE = "http://161.153.29.155:8000";
+const DEFAULT_VPS_BASE = "http://129.146.79.201:8000";
 
 const proxyRouter: IRouter = Router();
 
@@ -12,7 +12,7 @@ function resolveBase(req: import("express").Request): string {
 
 async function vpsRequest(
   path: string,
-  method: "GET" | "POST" | "PUT" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   body?: unknown,
   base?: string,
 ): Promise<Response> {
@@ -29,7 +29,7 @@ async function vpsRequest(
 
 async function jsonProxy(
   path: string,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   body: unknown,
   res: import("express").Response,
   req: import("express").Request,
@@ -78,6 +78,35 @@ proxyRouter.post("/ai-test", async (req, res) => {
 // GET /api/proxy/invoices  →  GET VPS /invoices
 proxyRouter.get("/invoices", async (req, res) => {
   await jsonProxy("/invoices", "GET", undefined, res, req);
+});
+
+proxyRouter.post("/chat-threads", async (req, res) => {
+  await jsonProxy("/chat-threads", "POST", req.body, res, req);
+});
+
+proxyRouter.get("/chat-threads", async (req, res) => {
+  const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+  await jsonProxy(`/chat-threads${query}`, "GET", undefined, res, req);
+});
+
+proxyRouter.get("/chat-threads/:chatId/session-memory", async (req, res) => {
+  await jsonProxy(`/chat-threads/${encodeURIComponent(req.params.chatId)}/session-memory`, "GET", undefined, res, req);
+});
+
+proxyRouter.delete("/chat-threads/:chatId/session-memory/document-scope", async (req, res) => {
+  await jsonProxy(`/chat-threads/${encodeURIComponent(req.params.chatId)}/session-memory/document-scope`, "DELETE", undefined, res, req);
+});
+
+proxyRouter.get("/chat-threads/:chatId", async (req, res) => {
+  await jsonProxy(`/chat-threads/${encodeURIComponent(req.params.chatId)}`, "GET", undefined, res, req);
+});
+
+proxyRouter.patch("/chat-threads/:chatId", async (req, res) => {
+  await jsonProxy(`/chat-threads/${encodeURIComponent(req.params.chatId)}`, "PATCH", req.body, res, req);
+});
+
+proxyRouter.delete("/chat-threads/:chatId", async (req, res) => {
+  await jsonProxy(`/chat-threads/${encodeURIComponent(req.params.chatId)}`, "DELETE", undefined, res, req);
 });
 
 // GET /api/proxy/pdf?path=/invoices/.../pdf
