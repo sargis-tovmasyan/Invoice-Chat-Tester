@@ -1,7 +1,7 @@
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 // Left column: "New Chat" button + the list of chat sessions.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ChatSession } from "../../types";
 
 export function Sidebar({
@@ -25,8 +25,27 @@ export function Sidebar({
   const [showArchived, setShowArchived] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!openMenuId) return;
+
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-chat-menu-root]")) return;
+      setOpenMenuId(null);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [openMenuId]);
+
   const visibleSessions = useMemo(
-    () => sessions.filter((session) => !removedIds.has(session.id) && !archivedIds.has(session.id)),
+    () =>
+      sessions.filter(
+        (session) =>
+          !removedIds.has(session.id) &&
+          !archivedIds.has(session.id) &&
+          (session.backendChatId || session.messages.length > 0),
+      ),
     [archivedIds, removedIds, sessions],
   );
 
@@ -144,16 +163,17 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto chat-scroll pl-2 pr-0 pb-3 space-y-1">
+      <div className="flex-1 overflow-y-auto chat-scroll px-2 pb-3 space-y-1">
         {visibleSessions.map((session) => {
           const isActive = session.id === activeSessionId;
           return (
             <div
               key={session.id}
-              className={`relative group mr-2 rounded-xl transition-colors ${
+              data-chat-menu-root
+              className={`relative group rounded-xl border transition-colors ${
                 isActive
-                  ? "mr-0 rounded-r-none border-y border-l border-border bg-background shadow-sm"
-                  : "bg-card/60 hover:bg-accent/80 border border-transparent"
+                  ? "border-primary/25 bg-background shadow-sm ring-1 ring-primary/10"
+                  : "border-transparent bg-card/60 hover:bg-accent/80"
               }`}
             >
               <div className="flex items-center gap-1">
@@ -189,25 +209,13 @@ export function Sidebar({
 
               {openMenuId === session.id && (
                 <div className="absolute right-2 top-10 z-20 w-36 overflow-hidden rounded-xl border border-border bg-popover shadow-lg">
-                  <button
-                    type="button"
-                    onClick={() => renameSession(session)}
-                    className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
-                  >
+                  <button type="button" onClick={() => renameSession(session)} className="block w-full px-3 py-2 text-left text-sm hover:bg-accent">
                     Rename
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => archiveSession(session)}
-                    className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
-                  >
+                  <button type="button" onClick={() => archiveSession(session)} className="block w-full px-3 py-2 text-left text-sm hover:bg-accent">
                     Archive
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => removeSession(session)}
-                    className="block w-full px-3 py-2 text-left text-sm text-destructive hover:bg-accent"
-                  >
+                  <button type="button" onClick={() => removeSession(session)} className="block w-full px-3 py-2 text-left text-sm text-destructive hover:bg-accent">
                     Remove
                   </button>
                 </div>
@@ -217,7 +225,7 @@ export function Sidebar({
         })}
 
         {archivedSessions.length > 0 && (
-          <div className="pt-3 pr-2">
+          <div className="pt-3">
             <button
               type="button"
               onClick={() => setShowArchived((value) => !value)}
