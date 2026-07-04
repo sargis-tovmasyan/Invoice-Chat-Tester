@@ -11,6 +11,7 @@ export function Sidebar({
   onSelectSession,
   collapsed,
   onToggleCollapsed,
+  isLoadingChats = false,
 }: {
   sessions: ChatSession[];
   activeSessionId: string;
@@ -18,6 +19,7 @@ export function Sidebar({
   onSelectSession: (id: string) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  isLoadingChats?: boolean;
 }) {
   const [renamedTitles, setRenamedTitles] = useState<Record<string, string>>({});
   const [archivedIds, setArchivedIds] = useState<Set<string>>(() => new Set());
@@ -164,6 +166,20 @@ export function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto chat-scroll px-2 pb-3 space-y-1">
+        {isLoadingChats && visibleSessions.length === 0 && (
+          <div className="space-y-2 px-1 pt-1" aria-label="Loading chats">
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="h-11 rounded-xl border border-border bg-card/60 px-3 py-3">
+                <div className="h-3 w-3/4 animate-pulse rounded bg-muted-foreground/20" />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!isLoadingChats && visibleSessions.length === 0 && (
+          <div className="px-3 py-4 text-sm text-muted-foreground">No chats yet.</div>
+        )}
+
         {visibleSessions.map((session) => {
           const isActive = session.id === activeSessionId;
           return (
