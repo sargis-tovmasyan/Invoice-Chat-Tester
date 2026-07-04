@@ -4,6 +4,7 @@
 // the user configured (sent as the X-Api-Base header).
 
 import { PROXY_BASE, DEFAULT_API_BASE, LS_KEY } from "../lib/constants";
+import type { ChatThread } from "../types";
 
 export function getApiBase(): string {
   try {
@@ -80,10 +81,20 @@ export async function completeInvoiceDraft(draft: unknown, chatId?: string) {
   );
 }
 
-export async function getChatThreads() {
-  return apiGet<import("../types").ChatThread[]>("/chat-threads");
+export async function getChatThread(chatId: string) {
+  return apiGet<ChatThread>(`/chat-threads/${encodeURIComponent(chatId)}`);
 }
 
-export async function getChatThread(chatId: string) {
-  return apiGet<import("../types").ChatThread>(`/chat-threads/${encodeURIComponent(chatId)}`);
+export async function getChatThreads() {
+  const result = await apiGet<ChatThread[]>("/chat-threads");
+  if (!result.ok || !Array.isArray(result.data) || result.data.length === 0) return result;
+
+  const hydratedThreads = await Promise.all(
+    result.data.map(async (thread) => {
+      const detail = await getChatThread(thread.id);
+      return detail.ok ? detail.data : thread;
+    }),
+  );
+
+  return { ...result, data: hydratedThreads };
 }
