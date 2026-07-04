@@ -82,6 +82,21 @@ function sessionFromThread(thread: ChatThread): ChatSession {
   return session;
 }
 
+function mergeLoadedSession(local: ChatSession | undefined, loaded: ChatSession): ChatSession {
+  if (!local) return loaded;
+
+  const localHasNewerUiState = local.messages.length > loaded.messages.length || local.pendingForm !== null;
+  if (!localHasNewerUiState) return loaded;
+
+  return {
+    ...loaded,
+    title: local.title || loaded.title,
+    messages: local.messages,
+    pendingForm: local.pendingForm,
+    backendChatId: loaded.backendChatId ?? local.backendChatId,
+  };
+}
+
 export default function App() {
   // ── Sessions (sidebar) ────────────────────────────────────────────────────
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createEmptySession()]);
@@ -156,13 +171,20 @@ export default function App() {
     const loadedSessions = data.map(sessionFromThread);
 
     setSessions((current) => {
-      const localSessions = current.filter(
-        (session) => !session.backendChatId && (session.messages.length > 0 || session.id === activeSessionId),
-      );
-      const localIds = new Set(localSessions.map((session) => session.id));
-      const loadedWithoutLocalDuplicates = loadedSessions.filter((session) => !localIds.has(session.id));
+      const mergedLoaded = loadedSessions.map((loaded) => {
+        const local = current.find((session) => session.id === loaded.id || session.backendChatId === loaded.backendChatId);
+        return mergeLoadedSession(local, loaded);
+      });
 
-      return [...localSessions, ...loadedWithoutLocalDuplicates];
+      const loadedIds = new Set(mergedLoaded.flatMap((session) => [session.id, session.backendChatId].filter(Boolean) as string[]));
+      const localOnly = current.filter(
+        (session) =>
+          !loadedIds.has(session.id) &&
+          (!session.backendChatId || !loadedIds.has(session.backendChatId)) &&
+          (session.messages.length > 0 || session.id === activeSessionId),
+      );
+
+      return [...localOnly, ...mergedLoaded];
     });
   }, [activeSessionId]);
 
@@ -185,7 +207,7 @@ export default function App() {
     const { data, ok } = await getChatThread(session.backendChatId);
     if (ok) {
       const loadedSession = sessionFromThread(data);
-      setSessions((current) => current.map((item) => (item.id === id ? loadedSession : item)));
+      setSessions((current) => current.map((item) => (item.id === id ? mergeLoadedSession(item, loadedSession) : item)));
     }
   };
 
