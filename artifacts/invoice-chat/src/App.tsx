@@ -154,16 +154,17 @@ export default function App() {
     const { data, ok } = await getChatThreads();
     if (!ok || !Array.isArray(data)) return;
     const loadedSessions = data.map(sessionFromThread);
-    if (loadedSessions.length === 0) return;
+
     setSessions((current) => {
-      const unsaved = current.filter((session) => !session.backendChatId && session.messages.length > 0);
-      return [...loadedSessions, ...unsaved];
+      const localSessions = current.filter(
+        (session) => !session.backendChatId && (session.messages.length > 0 || session.id === activeSessionId),
+      );
+      const localIds = new Set(localSessions.map((session) => session.id));
+      const loadedWithoutLocalDuplicates = loadedSessions.filter((session) => !localIds.has(session.id));
+
+      return [...localSessions, ...loadedWithoutLocalDuplicates];
     });
-    setActiveSessionId((current) => {
-      const stillExists = loadedSessions.some((session) => session.id === current);
-      return stillExists ? current : loadedSessions[0].id;
-    });
-  }, []);
+  }, [activeSessionId]);
 
   useEffect(() => {
     void refreshThreads();
@@ -193,7 +194,7 @@ export default function App() {
   const callComplete = useCallback(async (sessionId: string, draft: DraftObject) => {
     setLoadingLabel("Creating invoice…");
     const session = sessions.find((item) => item.id === sessionId);
-    const { data, ok } = await completeInvoiceDraft(draft, session?.backendChatId) as { data: CompleteResponse; ok: boolean };
+    const { data, ok } = await completeInvoiceDraft(draft, session?.backendChatId) as { data: CompleteResponse & { chat_id?: string }; ok: boolean };
 
     if (!ok || (data.status && data.status !== "created" && !data.invoice_id)) {
       playError();
@@ -205,14 +206,20 @@ export default function App() {
       return;
     }
 
+    if (data.chat_id) {
+      updateSession(sessionId, (current) => ({
+        ...current,
+        backendChatId: data.chat_id,
+      }));
+    }
+
     playSuccess();
     addMsg(sessionId, {
       role: "assistant",
       text: `Invoice created — ${data.invoice_number ?? `#${data.invoice_id}`}`,
       payload: { kind: "invoice", data, raw: data },
     });
-    await refreshThreads();
-  }, [addMsg, refreshThreads, sessions]);
+  }, [addMsg, sessions, updateSession]);
 
   // ── Handle missing fields form submit ─────────────────────────────────────
 
@@ -379,7 +386,6 @@ export default function App() {
       playError();
       addMsg(sessionId, { role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}` });
     } finally {
-      void refreshThreads();
       setLoading(false);
       setLoadingLabel("Thinking…");
     }
