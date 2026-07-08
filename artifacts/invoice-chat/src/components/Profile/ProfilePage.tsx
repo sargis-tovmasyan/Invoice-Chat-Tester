@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 
 import { changeProfilePassword, updateProfileEmail } from "../../api/client";
 import type { UserProfile } from "../../types";
@@ -32,7 +32,7 @@ export function ProfilePage({
   const [submittingEmail, setSubmittingEmail] = useState(false);
   const [submittingPassword, setSubmittingPassword] = useState(false);
 
-  const submitEmail = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submitEmail = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submittingEmail) return;
 
@@ -54,7 +54,7 @@ export function ProfilePage({
     }
   };
 
-  const submitPassword = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submitPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submittingPassword) return;
 
