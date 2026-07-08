@@ -9,6 +9,7 @@ export function Sidebar({
   activeSessionId,
   onNewChat,
   onSelectSession,
+  onRemoveSession,
   collapsed,
   onToggleCollapsed,
   isLoadingChats = false,
@@ -17,13 +18,13 @@ export function Sidebar({
   activeSessionId: string;
   onNewChat: () => void;
   onSelectSession: (id: string) => void;
+  onRemoveSession: (id: string) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   isLoadingChats?: boolean;
 }) {
   const [renamedTitles, setRenamedTitles] = useState<Record<string, string>>({});
   const [archivedIds, setArchivedIds] = useState<Set<string>>(() => new Set());
-  const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
   const [showArchived, setShowArchived] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
@@ -44,16 +45,15 @@ export function Sidebar({
     () =>
       sessions.filter(
         (session) =>
-          !removedIds.has(session.id) &&
           !archivedIds.has(session.id) &&
           (session.backendChatId || session.messages.length > 0),
       ),
-    [archivedIds, removedIds, sessions],
+    [archivedIds, sessions],
   );
 
   const archivedSessions = useMemo(
-    () => sessions.filter((session) => !removedIds.has(session.id) && archivedIds.has(session.id)),
-    [archivedIds, removedIds, sessions],
+    () => sessions.filter((session) => archivedIds.has(session.id)),
+    [archivedIds, sessions],
   );
 
   const displayTitle = (session: ChatSession) => renamedTitles[session.id] ?? session.title;
@@ -62,7 +62,7 @@ export function Sidebar({
     if (blockedSessionId !== activeSessionId) return;
 
     const fallback = sessions.find(
-      (session) => session.id !== blockedSessionId && !removedIds.has(session.id) && !archivedIds.has(session.id),
+      (session) => session.id !== blockedSessionId && !archivedIds.has(session.id),
     );
 
     if (fallback) {
@@ -105,8 +105,7 @@ export function Sidebar({
 
   const removeSession = (session: ChatSession) => {
     setOpenMenuId(null);
-    setRemovedIds((current) => new Set(current).add(session.id));
-    selectFallbackSession(session.id);
+    onRemoveSession(session.id);
   };
 
   const toggleMenu = (sessionId: string) => {
