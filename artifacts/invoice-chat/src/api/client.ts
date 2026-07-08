@@ -44,24 +44,34 @@ interface ApiResult<T> {
   status: number;
 }
 
+async function parseApiResponse<T>(resp: Response): Promise<ApiResult<T>> {
+  const ct = resp.headers.get("content-type") ?? "";
+  const data = ct.includes("application/json") ? await resp.json() : { raw_response: await resp.text() };
+  return { data: data as T, ok: resp.ok, status: resp.status };
+}
+
 export async function apiPost<T>(path: string, body: unknown): Promise<ApiResult<T>> {
   const resp = await fetch(`${PROXY_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Api-Base": getApiBase() },
     body: JSON.stringify(body),
   });
-  const ct = resp.headers.get("content-type") ?? "";
-  const data = ct.includes("application/json") ? await resp.json() : { raw_response: await resp.text() };
-  return { data: data as T, ok: resp.ok, status: resp.status };
+  return parseApiResponse<T>(resp);
 }
 
 export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
   const resp = await fetch(`${PROXY_BASE}${path}`, {
     headers: { "X-Api-Base": getApiBase() },
   });
-  const ct = resp.headers.get("content-type") ?? "";
-  const data = ct.includes("application/json") ? await resp.json() : { raw_response: await resp.text() };
-  return { data: data as T, ok: resp.ok, status: resp.status };
+  return parseApiResponse<T>(resp);
+}
+
+export async function apiDelete<T>(path: string): Promise<ApiResult<T>> {
+  const resp = await fetch(`${PROXY_BASE}${path}`, {
+    method: "DELETE",
+    headers: { "X-Api-Base": getApiBase() },
+  });
+  return parseApiResponse<T>(resp);
 }
 
 // The one call this whole app is built around: POST {API_BASE_URL}/ai/chat
@@ -87,4 +97,8 @@ export async function getChatThread(chatId: string) {
 
 export async function getChatThreads() {
   return apiGet<ChatThread[]>("/chat-threads");
+}
+
+export async function deleteChatThread(chatId: string) {
+  return apiDelete<{ status?: string; message?: string }>(`/chat-threads/${encodeURIComponent(chatId)}`);
 }
