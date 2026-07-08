@@ -4,6 +4,21 @@
 
 export type MessageRole = "user" | "assistant" | "system" | "error";
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  display_name?: string | null;
+  email_verified_at?: string | null;
+  created_at?: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: "bearer" | string;
+  expires_in: number;
+  user: UserProfile;
+}
+
 export type ChatStatus =
   | "answer"
   | "invoice_list"
