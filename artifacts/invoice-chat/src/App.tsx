@@ -11,7 +11,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { unlockAudio, playSend, playReceive, playSuccess, playError, playMissingFields, playConfirm, playPing } from "./lib/sounds";
 import { PROXY_BASE, INVOICE_FORM_FIELDS } from "./lib/constants";
 import { uid, deepClone, setNestedValue, normalizeFormValue, validateFormValues, buildInitialFormValues, responseErrorMessage, deriveSessionTitle } from "./lib/helpers";
-import { apiGet, sendChatMessage, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread } from "./api/client";
+import { apiGet, sendChatMessage, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, deleteChatThread } from "./api/client";
 import { createEmptySession } from "./session/sessionHelpers";
 
 import { Sidebar } from "./components/Sidebar/Sidebar";
@@ -219,6 +219,42 @@ export default function App() {
     setActiveSessionId(session.id);
     setInput("");
   };
+
+  const handleRemoveSession = useCallback((id: string) => {
+    const session = sessions.find((item) => item.id === id);
+    const nextSessions = sessions.filter((item) => item.id !== id);
+
+    if (nextSessions.length === 0) {
+      const emptySession = createEmptySession();
+      setSessions([emptySession]);
+      if (id === activeSessionId) setActiveSessionId(emptySession.id);
+    } else {
+      setSessions(nextSessions);
+      if (id === activeSessionId) setActiveSessionId(nextSessions[0].id);
+    }
+
+    clearSessionLoading(id);
+
+    if (!session?.backendChatId) return;
+
+    void deleteChatThread(session.backendChatId)
+      .then(({ ok, data }) => {
+        if (ok) return;
+        playError();
+        addMsg(nextSessions[0]?.id ?? activeSessionId, {
+          role: "error",
+          text: data.message ?? "Could not remove chat from backend. It may reappear after reload.",
+          payload: { kind: "generic", raw: data },
+        });
+      })
+      .catch((error: unknown) => {
+        playError();
+        addMsg(nextSessions[0]?.id ?? activeSessionId, {
+          role: "error",
+          text: `Remove chat failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      });
+  }, [activeSessionId, addMsg, clearSessionLoading, sessions]);
 
   const handleSelectSession = async (id: string) => {
     setActiveSessionId(id);
@@ -495,6 +531,7 @@ export default function App() {
         activeSessionId={activeSessionId}
         onNewChat={handleNewChat}
         onSelectSession={handleSelectSession}
+        onRemoveSession={handleRemoveSession}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}
         isLoadingChats={threadsLoading}
