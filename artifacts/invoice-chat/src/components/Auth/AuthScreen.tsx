@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 
 import { loginUser, registerUser } from "../../api/client";
 import type { UserProfile } from "../../types";
@@ -27,7 +27,7 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: UserPr
   const title = mode === "login" ? "Sign in" : "Create account";
   const actionLabel = mode === "login" ? "Sign in" : "Create account";
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submitting) return;
 
