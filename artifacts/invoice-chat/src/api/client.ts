@@ -4,7 +4,17 @@
 // the user configured (sent as the X-Api-Base header).
 
 import { PROXY_BASE, DEFAULT_API_BASE, LS_KEY } from "../lib/constants";
-import type { ChatThread } from "../types";
+import type { AuthResponse, ChatThread, UserProfile } from "../types";
+
+let accessToken: string | null = null;
+
+export function setAccessToken(token: string | null): void {
+  accessToken = token;
+}
+
+export function getAccessToken(): string | null {
+  return accessToken;
+}
 
 export function getApiBase(): string {
   try {
@@ -50,10 +60,25 @@ async function parseApiResponse<T>(resp: Response): Promise<ApiResult<T>> {
   return { data: data as T, ok: resp.ok, status: resp.status };
 }
 
+function authHeaders(): Record<string, string> {
+  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+}
+
 export async function apiPost<T>(path: string, body: unknown): Promise<ApiResult<T>> {
   const resp = await fetch(`${PROXY_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Api-Base": getApiBase() },
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "X-Api-Base": getApiBase(), ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  return parseApiResponse<T>(resp);
+}
+
+export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResult<T>> {
+  const resp = await fetch(`${PROXY_BASE}${path}`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "X-Api-Base": getApiBase(), ...authHeaders() },
     body: JSON.stringify(body),
   });
   return parseApiResponse<T>(resp);
@@ -61,7 +86,8 @@ export async function apiPost<T>(path: string, body: unknown): Promise<ApiResult
 
 export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
   const resp = await fetch(`${PROXY_BASE}${path}`, {
-    headers: { "X-Api-Base": getApiBase() },
+    credentials: "same-origin",
+    headers: { "X-Api-Base": getApiBase(), ...authHeaders() },
   });
   return parseApiResponse<T>(resp);
 }
@@ -69,9 +95,46 @@ export async function apiGet<T>(path: string): Promise<ApiResult<T>> {
 export async function apiDelete<T>(path: string): Promise<ApiResult<T>> {
   const resp = await fetch(`${PROXY_BASE}${path}`, {
     method: "DELETE",
-    headers: { "X-Api-Base": getApiBase() },
+    credentials: "same-origin",
+    headers: { "X-Api-Base": getApiBase(), ...authHeaders() },
   });
   return parseApiResponse<T>(resp);
+}
+
+export async function registerUser(payload: { email: string; password: string; display_name?: string }) {
+  const result = await apiPost<AuthResponse>("/auth/register", payload);
+  if (result.ok) setAccessToken(result.data.access_token);
+  return result;
+}
+
+export async function loginUser(payload: { email: string; password: string }) {
+  const result = await apiPost<AuthResponse>("/auth/login", payload);
+  if (result.ok) setAccessToken(result.data.access_token);
+  return result;
+}
+
+export async function refreshSession() {
+  const result = await apiPost<AuthResponse>("/auth/refresh", {});
+  if (result.ok) setAccessToken(result.data.access_token);
+  return result;
+}
+
+export async function logoutUser() {
+  const result = await apiPost<{ status?: string }>("/auth/logout", {});
+  setAccessToken(null);
+  return result;
+}
+
+export async function getCurrentUser() {
+  return apiGet<UserProfile>("/auth/me");
+}
+
+export async function updateProfileEmail(payload: { current_password: string; new_email: string }) {
+  return apiPatch<UserProfile>("/auth/me/email", payload);
+}
+
+export async function changeProfilePassword(payload: { current_password: string; new_password: string }) {
+  return apiPatch<{ status?: string }>("/auth/me/password", payload);
 }
 
 // The one call this whole app is built around: POST {API_BASE_URL}/ai/chat
