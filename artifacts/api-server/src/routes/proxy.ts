@@ -10,17 +10,42 @@ function resolveBase(req: import("express").Request): string {
   return (val && val.trim()) ? val.trim().replace(/\/$/, "") : DEFAULT_VPS_BASE;
 }
 
+function appendUpstreamCookies(upstream: Response, res: import("express").Response): void {
+  const headers = upstream.headers as Headers & {
+    getSetCookie?: () => string[];
+    raw?: () => Record<string, string[]>;
+  };
+
+  const cookies = headers.getSetCookie?.() ?? headers.raw?.()["set-cookie"] ?? [];
+  if (cookies.length > 0) {
+    res.append("Set-Cookie", cookies);
+    return;
+  }
+
+  const singleCookie = upstream.headers.get("set-cookie");
+  if (singleCookie) res.append("Set-Cookie", singleCookie);
+}
+
 async function vpsRequest(
   path: string,
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-  body?: unknown,
+  body: unknown,
+  req: import("express").Request,
   base?: string,
 ): Promise<Response> {
   const url = `${base ?? DEFAULT_VPS_BASE}${path}`;
-  const opts: RequestInit = {
-    method,
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
   };
+
+  const authorization = req.headers.authorization;
+  if (authorization) headers.Authorization = Array.isArray(authorization) ? authorization[0] : authorization;
+
+  const cookie = req.headers.cookie;
+  if (cookie) headers.Cookie = cookie;
+
+  const opts: RequestInit = { method, headers };
   if (body !== undefined && method !== "GET") {
     opts.body = JSON.stringify(body);
   }
@@ -35,7 +60,9 @@ async function jsonProxy(
   req: import("express").Request,
 ) {
   try {
-    const upstream = await vpsRequest(path, method, body, resolveBase(req));
+    const upstream = await vpsRequest(path, method, body, req, resolveBase(req));
+    appendUpstreamCookies(upstream, res);
+
     let data: unknown;
     const ct = upstream.headers.get("content-type") ?? "";
     if (ct.includes("application/json")) {
@@ -49,6 +76,34 @@ async function jsonProxy(
     res.status(502).json({ error: "Proxy error", detail: String(err) });
   }
 }
+
+proxyRouter.post("/auth/register", async (req, res) => {
+  await jsonProxy("/auth/register", "POST", req.body, res, req);
+});
+
+proxyRouter.post("/auth/login", async (req, res) => {
+  await jsonProxy("/auth/login", "POST", req.body, res, req);
+});
+
+proxyRouter.post("/auth/refresh", async (req, res) => {
+  await jsonProxy("/auth/refresh", "POST", req.body, res, req);
+});
+
+proxyRouter.post("/auth/logout", async (req, res) => {
+  await jsonProxy("/auth/logout", "POST", req.body, res, req);
+});
+
+proxyRouter.get("/auth/me", async (req, res) => {
+  await jsonProxy("/auth/me", "GET", undefined, res, req);
+});
+
+proxyRouter.patch("/auth/me/email", async (req, res) => {
+  await jsonProxy("/auth/me/email", "PATCH", req.body, res, req);
+});
+
+proxyRouter.patch("/auth/me/password", async (req, res) => {
+  await jsonProxy("/auth/me/password", "PATCH", req.body, res, req);
+});
 
 // POST /api/proxy/extract  →  POST VPS /ai/invoice/extract
 proxyRouter.post("/extract", async (req, res) => {
@@ -133,7 +188,13 @@ proxyRouter.get("/pdf", async (req, res) => {
   }
 
   try {
-    const upstream = await fetch(target);
+    const headers: Record<string, string> = {};
+    const authorization = req.headers.authorization;
+    if (authorization) headers.Authorization = Array.isArray(authorization) ? authorization[0] : authorization;
+    const cookie = req.headers.cookie;
+    if (cookie) headers.Cookie = cookie;
+
+    const upstream = await fetch(target, { headers });
     const ct = upstream.headers.get("content-type") ?? "application/pdf";
     const cd =
       upstream.headers.get("content-disposition") ??
