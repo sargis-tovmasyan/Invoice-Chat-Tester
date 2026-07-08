@@ -23,6 +23,8 @@ import { SetupScreen } from "./components/Settings/SetupScreen";
 
 import type { ChatSession, Message, PendingForm, DraftObject, CompleteResponse, ChatResponse, InvoiceListItem, ParsedPayload, StoredChatMessage, ChatThread } from "./types";
 
+const CHAT_HISTORY_LOADING_LABEL = "Loading chat…";
+
 function parseStoredPayload(raw: unknown): ParsedPayload | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const record = raw as ChatResponse;
@@ -223,10 +225,15 @@ export default function App() {
     setInput("");
     const session = sessions.find((item) => item.id === id);
     if (!session?.backendChatId) return;
-    const { data, ok } = await getChatThread(session.backendChatId);
-    if (ok) {
-      const loadedSession = sessionFromThread(data);
-      setSessions((current) => current.map((item) => (item.id === id ? mergeLoadedSession(item, loadedSession) : item)));
+    setSessionLoading(id, CHAT_HISTORY_LOADING_LABEL);
+    try {
+      const { data, ok } = await getChatThread(session.backendChatId);
+      if (ok) {
+        const loadedSession = sessionFromThread(data);
+        setSessions((current) => current.map((item) => (item.id === id ? mergeLoadedSession(item, loadedSession) : item)));
+      }
+    } finally {
+      clearSessionLoading(id);
     }
   };
 
@@ -466,6 +473,7 @@ export default function App() {
   };
 
   const isBlocked = activeSessionLoading || pendingForm !== null;
+  const isLoadingChatHistory = activeLoadingLabel === CHAT_HISTORY_LOADING_LABEL;
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -516,6 +524,7 @@ export default function App() {
         <main className="flex-1 overflow-hidden flex flex-col min-h-0">
           <ConversationArea
             messages={messages}
+            loadingSession={isLoadingChatHistory}
             loading={activeSessionLoading}
             loadingLabel={activeLoadingLabel ?? "Thinking…"}
             pendingForm={pendingForm}

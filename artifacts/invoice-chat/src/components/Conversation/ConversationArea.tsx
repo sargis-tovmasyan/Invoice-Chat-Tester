@@ -10,6 +10,7 @@ import type { Message, PendingForm } from "../../types";
 
 export function ConversationArea({
   messages,
+  loadingSession,
   loading,
   loadingLabel,
   pendingForm,
@@ -20,6 +21,7 @@ export function ConversationArea({
   onFormSubmit,
 }: {
   messages: Message[];
+  loadingSession: boolean;
   loading: boolean;
   loadingLabel: string;
   pendingForm: PendingForm | null;
@@ -39,7 +41,9 @@ export function ConversationArea({
     <div className="flex-1 overflow-y-auto chat-scroll">
       <div className="max-w-3xl mx-auto px-4 py-6">
         {/* Empty state */}
-        {messages.length === 0 && !loading && (
+        {loadingSession && <ChatHistoryLoading />}
+
+        {messages.length === 0 && !loading && !loadingSession && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
               <svg className="w-7 h-7 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -75,8 +79,38 @@ export function ConversationArea({
           />
         ))}
 
-        {loading && <TypingIndicator label={loadingLabel} />}
+        {loading && !loadingSession && <TypingIndicator label={loadingLabel} />}
         <div ref={chatEndRef} />
+      </div>
+    </div>
+  );
+}
+
+function ChatHistoryLoading() {
+  return (
+    <div className="space-y-5 py-2" aria-label="Loading chat messages">
+      <div className="flex justify-end">
+        <div className="w-48 rounded-2xl bg-muted/70 p-3">
+          <div className="h-4 w-32 rounded bg-muted-foreground/15" />
+        </div>
+      </div>
+
+      <div className="flex gap-3">
+        <div className="mt-1 h-8 w-8 flex-shrink-0 rounded-full bg-primary/10" />
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-4 shadow-sm">
+          <div className="mb-3 h-4 w-40 rounded bg-muted" />
+          <div className="space-y-2">
+            <div className="h-3 w-full rounded bg-muted" />
+            <div className="h-3 w-5/6 rounded bg-muted" />
+            <div className="h-3 w-2/3 rounded bg-muted" />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <div className="w-56 rounded-2xl bg-muted/70 p-3">
+          <div className="h-4 w-44 rounded bg-muted-foreground/15" />
+        </div>
       </div>
     </div>
   );
