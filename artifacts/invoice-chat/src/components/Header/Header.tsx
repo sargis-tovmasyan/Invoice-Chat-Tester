@@ -2,10 +2,11 @@
 // Top bar: app title + current API base, quick Health/Invoices actions,
 // Clear chat, and the Settings toggle.
 
-import type { PendingForm } from "../../types";
+import type { PendingForm, UserProfile } from "../../types";
 
 export function Header({
   apiBase,
+  user,
   pendingForm,
   hasMessages,
   isBlocked,
@@ -13,10 +14,13 @@ export function Header({
   onRunHealth,
   onRunInvoices,
   onClearChat,
+  onOpenProfile,
+  onLogout,
   onToggleSettings,
   onToggleSidebar,
 }: {
   apiBase: string;
+  user: UserProfile;
   pendingForm: PendingForm | null;
   hasMessages: boolean;
   isBlocked: boolean;
@@ -24,6 +28,8 @@ export function Header({
   onRunHealth: () => void;
   onRunInvoices: () => void;
   onClearChat: () => void;
+  onOpenProfile: () => void;
+  onLogout: () => void;
   onToggleSettings: () => void;
   onToggleSidebar: () => void;
 }) {
@@ -72,6 +78,20 @@ export function Header({
               Clear
             </button>
           )}
+          <button
+            onClick={onOpenProfile}
+            title={user.email}
+            className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg border border-border bg-secondary hover:bg-accent transition-colors max-w-[150px] truncate"
+          >
+            {user.display_name || user.email}
+          </button>
+          <button
+            onClick={onLogout}
+            title="Logout"
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+          >
+            Logout
+          </button>
           <button
             onClick={onToggleSettings}
             title="Settings"
