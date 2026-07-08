@@ -11,7 +11,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { unlockAudio, playSend, playReceive, playSuccess, playError, playMissingFields, playConfirm, playPing } from "./lib/sounds";
 import { PROXY_BASE, INVOICE_FORM_FIELDS } from "./lib/constants";
 import { uid, deepClone, setNestedValue, normalizeFormValue, validateFormValues, buildInitialFormValues, responseErrorMessage, deriveSessionTitle } from "./lib/helpers";
-import { apiGet, sendChatMessage, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, deleteChatThread } from "./api/client";
+import { apiGet, sendChatMessage, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, deleteChatThread, refreshSession, logoutUser } from "./api/client";
 import { createEmptySession } from "./session/sessionHelpers";
 
 import { Sidebar } from "./components/Sidebar/Sidebar";
@@ -20,8 +20,10 @@ import { ConversationArea } from "./components/Conversation/ConversationArea";
 import { Composer } from "./components/Composer/Composer";
 import { SettingsPanel } from "./components/Settings/SettingsPanel";
 import { SetupScreen } from "./components/Settings/SetupScreen";
+import { AuthScreen } from "./components/Auth/AuthScreen";
+import { ProfilePage } from "./components/Profile/ProfilePage";
 
-import type { ChatSession, Message, PendingForm, DraftObject, CompleteResponse, ChatResponse, InvoiceListItem, ParsedPayload, StoredChatMessage, ChatThread } from "./types";
+import type { ChatSession, Message, PendingForm, DraftObject, CompleteResponse, ChatResponse, InvoiceListItem, ParsedPayload, StoredChatMessage, ChatThread, UserProfile } from "./types";
 
 const CHAT_HISTORY_LOADING_LABEL = "Loading chat…";
 
@@ -99,6 +101,10 @@ function mergeLoadedSession(local: ChatSession | undefined, loaded: ChatSession)
   };
 }
 
+function routePath(): string {
+  return window.location.pathname === "/profile" ? "/profile" : "/";
+}
+
 export default function App() {
   // ── Sessions (sidebar) ────────────────────────────────────────────────────
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createEmptySession()]);
@@ -107,6 +113,9 @@ export default function App() {
   const [threadsLoading, setThreadsLoading] = useState(true);
   const [loadingBySession, setLoadingBySession] = useState<Record<string, string>>({});
   const [formSubmittingSessionId, setFormSubmittingSessionId] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<UserProfile | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [currentRoute, setCurrentRoute] = useState(() => routePath());
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0];
   const messages = activeSession.messages;
@@ -134,6 +143,33 @@ export default function App() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    const onPopState = () => setCurrentRoute(routePath());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!configured) {
+      setAuthChecking(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAuthChecking(true);
+    void refreshSession()
+      .then(({ data, ok }) => {
+        if (!cancelled && ok) setAuthUser(data.user);
+      })
+      .finally(() => {
+        if (!cancelled) setAuthChecking(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [configured, apiBase]);
 
   // Unlock AudioContext on first interaction (browser requirement)
   useEffect(() => {
@@ -183,6 +219,7 @@ export default function App() {
   );
 
   const refreshThreads = useCallback(async () => {
+    if (!authUser) return;
     try {
       const { data, ok } = await getChatThreads();
       if (!ok || !Array.isArray(data)) return;
@@ -207,11 +244,13 @@ export default function App() {
     } finally {
       setThreadsLoading(false);
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, authUser]);
 
   useEffect(() => {
+    if (!authUser) return;
+    setThreadsLoading(true);
     void refreshThreads();
-  }, [refreshThreads]);
+  }, [authUser, refreshThreads]);
 
   const handleNewChat = () => {
     const session = createEmptySession();
@@ -508,6 +547,27 @@ export default function App() {
     updateSession(activeSessionId, (s) => ({ ...s, messages: [], pendingForm: null }));
   };
 
+  const openProfile = () => {
+    window.history.pushState({}, "", "/profile");
+    setCurrentRoute("/profile");
+  };
+
+  const closeProfile = () => {
+    window.history.pushState({}, "", "/");
+    setCurrentRoute("/");
+  };
+
+  const handleLogout = async () => {
+    await logoutUser();
+    const emptySession = createEmptySession();
+    setAuthUser(null);
+    setSessions([emptySession]);
+    setActiveSessionId(emptySession.id);
+    setLoadingBySession({});
+    setThreadsLoading(false);
+    closeProfile();
+  };
+
   const isBlocked = activeSessionLoading || pendingForm !== null;
   const isLoadingChatHistory = activeLoadingLabel === CHAT_HISTORY_LOADING_LABEL;
 
@@ -519,9 +579,26 @@ export default function App() {
         onDone={(base) => {
           setApiBase(base);
           setConfigured(true);
+          setAuthChecking(true);
         }}
       />
     );
+  }
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-sm text-muted-foreground">
+        Checking session…
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return <AuthScreen onAuthenticated={setAuthUser} />;
+  }
+
+  if (currentRoute === "/profile") {
+    return <ProfilePage user={authUser} onBack={closeProfile} onUserUpdated={setAuthUser} />;
   }
 
   return (
@@ -540,6 +617,7 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <Header
           apiBase={apiBase}
+          user={authUser}
           pendingForm={pendingForm}
           hasMessages={messages.length > 0}
           isBlocked={isBlocked}
@@ -547,6 +625,8 @@ export default function App() {
           onRunHealth={() => runAction("GET /health", () => apiGet("/health"))}
           onRunInvoices={() => runAction("GET /invoices", () => apiGet("/invoices"))}
           onClearChat={clearChat}
+          onOpenProfile={openProfile}
+          onLogout={() => void handleLogout()}
           onToggleSettings={() => setSettingsOpen((o) => !o)}
           onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
         />
