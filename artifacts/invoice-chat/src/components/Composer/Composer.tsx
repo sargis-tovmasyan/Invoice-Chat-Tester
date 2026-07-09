@@ -12,6 +12,8 @@ export function Composer({
   isBlocked,
   hasPendingForm,
   hasMessages,
+  thinkingEnabled,
+  onThinkingChange,
   textareaRef,
 }: {
   input: string;
@@ -21,6 +23,8 @@ export function Composer({
   isBlocked: boolean;
   hasPendingForm: boolean;
   hasMessages: boolean;
+  thinkingEnabled: boolean;
+  onThinkingChange: (value: boolean) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -55,6 +59,17 @@ export function Composer({
             Fill in the form above before sending a new message.
           </div>
         )}
+
+        <label className="mb-2 flex w-fit items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={thinkingEnabled}
+            onChange={(event) => onThinkingChange(event.target.checked)}
+            disabled={isBlocked}
+            className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-ring disabled:opacity-50"
+          />
+          Thinking
+        </label>
 
         <div className="flex items-end gap-2">
           <textarea

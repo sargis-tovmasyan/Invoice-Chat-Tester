@@ -105,6 +105,7 @@ export default function App() {
   const activeFormSubmitting = formSubmittingSessionId === activeSessionId;
 
   const [input, setInput] = useState("");
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiBase, setApiBase] = useState(() => getApiBase());
   const [configured, setConfigured] = useState(() => isApiBaseConfigured());
@@ -304,13 +305,13 @@ export default function App() {
     if (!text || activeSessionLoading || pendingForm !== null) return;
     const sessionId = activeSessionId;
     const session = sessions.find((item) => item.id === sessionId);
-    const requestBody = session?.backendChatId ? { message: text, chat_id: session.backendChatId } : { message: text };
+    const requestBody = session?.backendChatId ? { message: text, chat_id: session.backendChatId, thinking_enabled: thinkingEnabled } : { message: text, thinking_enabled: thinkingEnabled };
     if (!preset) setInput("");
     playSend();
     addMsg(sessionId, { role: "user", text, requestInfo: { method: "POST", endpoint: `${PROXY_BASE}/chat`, body: requestBody } });
     setSessionLoading(sessionId, "Thinking…");
     try {
-      const { data: chatData, ok } = await sendChatMessage(text, session?.backendChatId) as { data: ChatResponse; ok: boolean };
+      const { data: chatData, ok } = await sendChatMessage(text, session?.backendChatId, thinkingEnabled) as { data: ChatResponse; ok: boolean };
       if (!ok) {
         playError();
         addMsg(sessionId, { role: "error", text: `Chat request failed: ${String(chatData.message ?? (chatData as Record<string, unknown>).detail ?? "Server error")}`, payload: { kind: "generic", raw: chatData } });
@@ -404,7 +405,7 @@ export default function App() {
         {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onSave={(base) => setApiBase(base)} />}
         <main className="flex-1 overflow-hidden flex flex-col min-h-0">
           <ConversationArea messages={messages} loadingSession={isLoadingChatHistory} loading={activeSessionLoading} loadingLabel={activeLoadingLabel ?? "Thinking…"} pendingForm={pendingForm} formSubmitting={activeFormSubmitting} onSendExample={(p) => sendMessage(p)} onToggleRaw={toggleRaw} onFormChange={handleFormChange} onFormSubmit={handleFormSubmit} />
-          <Composer input={input} onInputChange={setInput} onSend={sendMessage} loading={activeSessionLoading} isBlocked={isBlocked} hasPendingForm={pendingForm !== null && !pendingForm.submitted} hasMessages={messages.length > 0} textareaRef={textareaRef} />
+          <Composer input={input} onInputChange={setInput} onSend={sendMessage} loading={activeSessionLoading} isBlocked={isBlocked} hasPendingForm={pendingForm !== null && !pendingForm.submitted} hasMessages={messages.length > 0} thinkingEnabled={thinkingEnabled} onThinkingChange={setThinkingEnabled} textareaRef={textareaRef} />
         </main>
       </div>
     </div>

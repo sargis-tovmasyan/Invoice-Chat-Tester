@@ -76,10 +76,11 @@ export async function apiDelete<T>(path: string): Promise<ApiResult<T>> {
 
 // The one call this whole app is built around: POST {API_BASE_URL}/ai/chat
 // (proxied as POST {PROXY_BASE}/chat -> the real API's /ai/chat route).
-export async function sendChatMessage(message: string, chatId?: string) {
+export async function sendChatMessage(message: string, chatId?: string, thinkingEnabled = false) {
+  const body = chatId ? { message, chat_id: chatId, thinking_enabled: thinkingEnabled } : { message, thinking_enabled: thinkingEnabled };
   return apiPost<import("../types").ChatResponse>(
     "/chat",
-    chatId ? { message, chat_id: chatId } : { message },
+    body,
   );
 }
 
