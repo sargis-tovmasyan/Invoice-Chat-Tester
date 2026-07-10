@@ -76,8 +76,10 @@ export async function apiDelete<T>(path: string): Promise<ApiResult<T>> {
 
 // The one call this whole app is built around: POST {API_BASE_URL}/ai/chat
 // (proxied as POST {PROXY_BASE}/chat -> the real API's /ai/chat route).
-export async function sendChatMessage(message: string, chatId?: string, thinkingEnabled = false) {
-  const body = chatId ? { message, chat_id: chatId, thinking_enabled: thinkingEnabled } : { message, thinking_enabled: thinkingEnabled };
+export async function sendChatMessage(message: string, chatId?: string, thinkingEnabled = false, temperaturePreset = "medium") {
+  const body = chatId
+    ? { message, chat_id: chatId, thinking_enabled: thinkingEnabled, temperature_preset: temperaturePreset }
+    : { message, thinking_enabled: thinkingEnabled, temperature_preset: temperaturePreset };
   return apiPost<import("../types").ChatResponse>(
     "/chat",
     body,

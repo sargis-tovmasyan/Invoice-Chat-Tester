@@ -14,6 +14,8 @@ export function Composer({
   hasMessages,
   thinkingEnabled,
   onThinkingChange,
+  temperaturePreset,
+  onTemperatureChange,
   textareaRef,
 }: {
   input: string;
@@ -25,6 +27,8 @@ export function Composer({
   hasMessages: boolean;
   thinkingEnabled: boolean;
   onThinkingChange: (value: boolean) => void;
+  temperaturePreset: string;
+  onTemperatureChange: (value: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -60,16 +64,32 @@ export function Composer({
           </div>
         )}
 
-        <label className="mb-2 flex w-fit items-center gap-2 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={thinkingEnabled}
-            onChange={(event) => onThinkingChange(event.target.checked)}
-            disabled={isBlocked}
-            className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-ring disabled:opacity-50"
-          />
-          Thinking
-        </label>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <label className="flex w-fit items-center gap-2">
+            <input
+              type="checkbox"
+              checked={thinkingEnabled}
+              onChange={(event) => onThinkingChange(event.target.checked)}
+              disabled={isBlocked}
+              className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-ring disabled:opacity-50"
+            />
+            Thinking
+          </label>
+          <label className="flex w-fit items-center gap-2">
+            Temperature
+            <select
+              value={temperaturePreset}
+              onChange={(event) => onTemperatureChange(event.target.value)}
+              disabled={isBlocked}
+              className="h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="extra_high">Extra high</option>
+            </select>
+          </label>
+        </div>
 
         <div className="flex items-end gap-2">
           <textarea
