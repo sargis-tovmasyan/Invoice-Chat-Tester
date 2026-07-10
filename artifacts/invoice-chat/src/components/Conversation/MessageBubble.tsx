@@ -65,6 +65,9 @@ export function MessageBubble({
       <div className="max-w-[75%] flex flex-col items-start">
         <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed shadow-sm ${isError ? "bg-red-50 border border-red-200 text-red-800" : "bg-card border border-border text-card-foreground"}`}>
           {msg.text}
+          {msg.streaming && (
+            <span className="streaming-caret ml-0.5 inline-block h-4 w-1 translate-y-0.5 rounded-full bg-primary/70 align-baseline" />
+          )}
         </div>
 
         {payload?.kind === "invoice" && (

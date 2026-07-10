@@ -24,6 +24,8 @@ import { SetupScreen } from "./components/Settings/SetupScreen";
 import type { ChatSession, Message, PendingForm, DraftObject, CompleteResponse, ChatResponse, InvoiceListItem, ParsedPayload, StoredChatMessage, ChatThread } from "./types";
 
 const CHAT_HISTORY_LOADING_LABEL = "Loading chat…";
+const STREAM_TYPE_INTERVAL_MS = 18;
+const STREAM_CHARS_PER_TICK = 3;
 
 function parseStoredPayload(raw: unknown): ParsedPayload | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
@@ -112,6 +114,8 @@ export default function App() {
   const [configured, setConfigured] = useState(() => isApiBaseConfigured());
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const streamQueuesRef = useRef<Record<string, string>>({});
+  const streamTimersRef = useRef<Record<string, number>>({});
 
   const setSessionLoading = useCallback((sessionId: string, label: string) => {
     setLoadingBySession((current) => ({ ...current, [sessionId]: label }));
@@ -154,6 +158,45 @@ export default function App() {
       messages: s.messages.map((message) => (message.id === messageId ? updater(message) : message)),
     }));
   }, [updateSession]);
+
+  const stopStreamTimer = useCallback((messageId: string) => {
+    const timer = streamTimersRef.current[messageId];
+    if (timer) window.clearInterval(timer);
+    delete streamTimersRef.current[messageId];
+  }, []);
+
+  const flushStreamQueue = useCallback((sessionId: string, messageId: string) => {
+    const queued = streamQueuesRef.current[messageId] ?? "";
+    if (queued) {
+      streamQueuesRef.current[messageId] = "";
+      updateMessage(sessionId, messageId, (message) => ({ ...message, text: `${message.text}${queued}` }));
+    }
+    stopStreamTimer(messageId);
+  }, [stopStreamTimer, updateMessage]);
+
+  const enqueueStreamText = useCallback((sessionId: string, messageId: string, content: string) => {
+    streamQueuesRef.current[messageId] = `${streamQueuesRef.current[messageId] ?? ""}${content}`;
+    if (streamTimersRef.current[messageId]) return;
+
+    streamTimersRef.current[messageId] = window.setInterval(() => {
+      const queued = streamQueuesRef.current[messageId] ?? "";
+      if (!queued) {
+        stopStreamTimer(messageId);
+        return;
+      }
+      const next = queued.slice(0, STREAM_CHARS_PER_TICK);
+      streamQueuesRef.current[messageId] = queued.slice(STREAM_CHARS_PER_TICK);
+      updateMessage(sessionId, messageId, (message) => ({ ...message, text: `${message.text}${next}` }));
+    }, STREAM_TYPE_INTERVAL_MS);
+  }, [stopStreamTimer, updateMessage]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(streamTimersRef.current).forEach((timer) => window.clearInterval(timer));
+      streamTimersRef.current = {};
+      streamQueuesRef.current = {};
+    };
+  }, []);
 
   const toggleRaw = useCallback((id: string) => {
     updateSession(activeSessionId, (s) => ({
@@ -335,9 +378,9 @@ export default function App() {
           if (event.type !== "token" || !event.content) return;
           if (!streamedAssistantId) {
             playReceive();
-            streamedAssistantId = addMsg(sessionId, { role: "assistant", text: "" });
+            streamedAssistantId = addMsg(sessionId, { role: "assistant", text: "", streaming: true });
           }
-          updateMessage(sessionId, streamedAssistantId, (message) => ({ ...message, text: `${message.text}${event.content}` }));
+          enqueueStreamText(sessionId, streamedAssistantId, event.content);
         },
       ) as { data: ChatResponse; ok: boolean };
       if (!ok) {
@@ -349,7 +392,12 @@ export default function App() {
       if (chatData.chat_id) updateSession(sessionId, (current) => ({ ...current, backendChatId: chatData.chat_id }));
       if (status === "answer") {
         if (streamedAssistantId) {
-          updateMessage(sessionId, streamedAssistantId, (message) => ({ ...message, text: chatData.message ?? message.text }));
+          flushStreamQueue(sessionId, streamedAssistantId);
+          updateMessage(sessionId, streamedAssistantId, (message) => ({
+            ...message,
+            text: chatData.message ?? message.text,
+            streaming: false,
+          }));
         } else {
           playReceive();
           addMsg(sessionId, { role: "assistant", text: chatData.message ?? "How can I help?" });

@@ -91,6 +91,7 @@ export interface Message {
   role: MessageRole;
   text: string;
   timestamp: number;
+  streaming?: boolean;
   payload?: ParsedPayload;
   showRaw?: boolean;
   requestInfo?: RequestInfo;
