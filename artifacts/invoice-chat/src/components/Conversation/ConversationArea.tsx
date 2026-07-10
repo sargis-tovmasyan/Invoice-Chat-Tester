@@ -32,6 +32,7 @@ export function ConversationArea({
   onFormSubmit: () => void;
 }) {
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const hasStreamingMessage = messages.some((message) => message.streaming);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -82,7 +83,7 @@ export function ConversationArea({
               />
             ))}
 
-            {loading && <TypingIndicator label={loadingLabel} />}
+            {loading && !hasStreamingMessage && <TypingIndicator label={loadingLabel} />}
             <div ref={chatEndRef} />
           </>
         )}
