@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -12,7 +12,13 @@ const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
-  await rm(distDir, { recursive: true, force: true });
+  const vercelOutputDir = path.resolve(artifactDir, ".vercel/output");
+  const functionDir = path.resolve(vercelOutputDir, "functions/api.func");
+
+  await Promise.all([
+    rm(distDir, { recursive: true, force: true }),
+    rm(vercelOutputDir, { recursive: true, force: true }),
+  ]);
 
   await esbuild({
     entryPoints: {
@@ -107,7 +113,7 @@ async function buildAll() {
     sourcemap: false,
     plugins: [
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
-      esbuildPluginPino({ transports: ["pino-pretty"] })
+      esbuildPluginPino({ transports: ["pino-pretty"] }),
     ],
     // Make sure packages that are cjs only (e.g. express) but are bundled continue to work in our esm output file
     banner: {
@@ -121,6 +127,36 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  await mkdir(functionDir, { recursive: true });
+  await cp(distDir, functionDir, { recursive: true });
+
+  await writeFile(
+    path.resolve(functionDir, ".vc-config.json"),
+    JSON.stringify(
+      {
+        runtime: "nodejs22.x",
+        handler: "vercel.mjs",
+        launcherType: "Nodejs",
+        shouldAddHelpers: true,
+        shouldAddSourcemapSupport: false,
+      },
+      null,
+      2,
+    ),
+  );
+
+  await writeFile(
+    path.resolve(vercelOutputDir, "config.json"),
+    JSON.stringify(
+      {
+        version: 3,
+        routes: [{ src: "/api(?:/.*)?", dest: "/api" }],
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 buildAll().catch((err) => {
