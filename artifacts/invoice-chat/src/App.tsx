@@ -11,7 +11,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { unlockAudio, playSend, playReceive, playSuccess, playError, playMissingFields, playConfirm, playPing } from "./lib/sounds";
 import { PROXY_BASE, INVOICE_FORM_FIELDS } from "./lib/constants";
 import { uid, deepClone, setNestedValue, normalizeFormValue, validateFormValues, buildInitialFormValues, responseErrorMessage, deriveSessionTitle } from "./lib/helpers";
-import { apiGet, sendChatMessage, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, deleteChatThread } from "./api/client";
+import { apiGet, sendChatMessageStream, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, deleteChatThread } from "./api/client";
 import { createEmptySession } from "./session/sessionHelpers";
 
 import { Sidebar } from "./components/Sidebar/Sidebar";
@@ -146,6 +146,13 @@ export default function App() {
       return { ...s, messages: [...s.messages, full], title: isFirstUserMsg ? deriveSessionTitle(m.text) : s.title };
     });
     return full.id;
+  }, [updateSession]);
+
+  const updateMessage = useCallback((sessionId: string, messageId: string, updater: (message: Message) => Message) => {
+    updateSession(sessionId, (s) => ({
+      ...s,
+      messages: s.messages.map((message) => (message.id === messageId ? updater(message) : message)),
+    }));
   }, [updateSession]);
 
   const toggleRaw = useCallback((id: string) => {
@@ -314,7 +321,25 @@ export default function App() {
     addMsg(sessionId, { role: "user", text, requestInfo: { method: "POST", endpoint: `${PROXY_BASE}/chat`, body: requestBody } });
     setSessionLoading(sessionId, "Thinking…");
     try {
-      const { data: chatData, ok } = await sendChatMessage(text, session?.backendChatId, thinkingEnabled, temperaturePreset) as { data: ChatResponse; ok: boolean };
+      let streamedAssistantId: string | null = null;
+      const { data: chatData, ok } = await sendChatMessageStream(
+        text,
+        session?.backendChatId,
+        thinkingEnabled,
+        temperaturePreset,
+        (event) => {
+          if (event.type === "start" && event.chat_id) {
+            updateSession(sessionId, (current) => ({ ...current, backendChatId: event.chat_id }));
+            return;
+          }
+          if (event.type !== "token" || !event.content) return;
+          if (!streamedAssistantId) {
+            playReceive();
+            streamedAssistantId = addMsg(sessionId, { role: "assistant", text: "" });
+          }
+          updateMessage(sessionId, streamedAssistantId, (message) => ({ ...message, text: `${message.text}${event.content}` }));
+        },
+      ) as { data: ChatResponse; ok: boolean };
       if (!ok) {
         playError();
         addMsg(sessionId, { role: "error", text: `Chat request failed: ${String(chatData.message ?? (chatData as Record<string, unknown>).detail ?? "Server error")}`, payload: { kind: "generic", raw: chatData } });
@@ -323,8 +348,12 @@ export default function App() {
       const status = chatData.status;
       if (chatData.chat_id) updateSession(sessionId, (current) => ({ ...current, backendChatId: chatData.chat_id }));
       if (status === "answer") {
-        playReceive();
-        addMsg(sessionId, { role: "assistant", text: chatData.message ?? "How can I help?" });
+        if (streamedAssistantId) {
+          updateMessage(sessionId, streamedAssistantId, (message) => ({ ...message, text: chatData.message ?? message.text }));
+        } else {
+          playReceive();
+          addMsg(sessionId, { role: "assistant", text: chatData.message ?? "How can I help?" });
+        }
         return;
       }
       if (status === "invoice_list") {

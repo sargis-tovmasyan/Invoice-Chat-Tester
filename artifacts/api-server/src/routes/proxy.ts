@@ -50,6 +50,50 @@ async function jsonProxy(
   }
 }
 
+async function streamProxy(
+  path: string,
+  method: "POST",
+  body: unknown,
+  res: import("express").Response,
+  req: import("express").Request,
+) {
+  try {
+    const upstream = await fetch(`${resolveBase(req)}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(body),
+    });
+
+    res.status(upstream.status);
+    res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+
+    const reader = upstream.body.getReader();
+    const pump = async (): Promise<void> => {
+      const { done, value } = await reader.read();
+      if (done) {
+        res.end();
+        return;
+      }
+      res.write(value);
+      return pump();
+    };
+    await pump();
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(502).json({ error: "Proxy stream error", detail: String(err) });
+    } else {
+      res.end();
+    }
+  }
+}
+
 // POST /api/proxy/extract  →  POST VPS /ai/invoice/extract
 proxyRouter.post("/extract", async (req, res) => {
   await jsonProxy("/ai/invoice/extract", "POST", req.body, res, req);
@@ -58,6 +102,11 @@ proxyRouter.post("/extract", async (req, res) => {
 // POST /api/proxy/chat  →  POST VPS /ai/chat
 proxyRouter.post("/chat", async (req, res) => {
   await jsonProxy("/ai/chat", "POST", req.body, res, req);
+});
+
+// POST /api/proxy/chat/stream  →  POST VPS /ai/chat/stream
+proxyRouter.post("/chat/stream", async (req, res) => {
+  await streamProxy("/ai/chat/stream", "POST", req.body, res, req);
 });
 
 // POST /api/proxy/complete  →  POST VPS /invoices/draft/complete
