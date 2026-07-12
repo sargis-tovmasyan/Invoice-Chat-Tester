@@ -5,6 +5,7 @@
 import { InvoiceCard } from "./InvoiceCard";
 import { InvoiceListPanel } from "./InvoiceListPanel";
 import { MissingFieldsForm } from "./MissingFieldsForm";
+import { MarkdownMessage } from "./MarkdownMessage";
 import { RequestDebugPanel } from "./RequestDebugPanel";
 import { RawToggle } from "./RawToggle";
 import type { Message, PendingForm } from "../../types";
@@ -44,7 +45,7 @@ export function MessageBubble({
       <div className="flex justify-end mb-4">
         <div className="max-w-[72%] flex flex-col items-end">
           <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-3 text-sm leading-relaxed shadow-sm">
-            {msg.text}
+            <MarkdownMessage content={msg.text} tone="user" />
           </div>
           {msg.requestInfo && <RequestDebugPanel info={msg.requestInfo} />}
           <div className="text-xs text-muted-foreground mt-1 px-1">{time}</div>
@@ -64,7 +65,7 @@ export function MessageBubble({
 
       <div className="max-w-[75%] flex flex-col items-start">
         <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed shadow-sm ${isError ? "bg-red-50 border border-red-200 text-red-800" : "bg-card border border-border text-card-foreground"}`}>
-          {msg.text}
+          {isError ? msg.text : <MarkdownMessage content={msg.text} tone="assistant" streaming={msg.streaming} />}
           {msg.streaming && (
             <span className="streaming-caret ml-0.5 inline-block h-4 w-1 translate-y-0.5 rounded-full bg-primary/70 align-baseline" />
           )}
