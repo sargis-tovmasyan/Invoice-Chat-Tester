@@ -9,6 +9,7 @@ import { MissingFieldsForm } from "./MissingFieldsForm";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { RequestDebugPanel } from "./RequestDebugPanel";
 import { RawToggle } from "./RawToggle";
+import { formatMessageDiagnostics } from "../../lib/diagnostics";
 import type { Message, PendingForm } from "../../types";
 
 export function MessageBubble({
@@ -124,11 +125,19 @@ export function MessageBubble({
           );
         })()}
 
-        {(payload?.kind === "generic" || payload?.kind === "error_status") && (
+        {!msg.streaming && (payload?.kind === "generic" || payload?.kind === "error_status") && (
           <RawToggle raw={payload.raw} showRaw={msg.showRaw ?? false} onToggle={() => onToggleRaw(msg.id)} />
         )}
 
-        <div className="text-xs text-muted-foreground mt-1 px-1">{time}</div>
+        <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground mt-1 px-1">
+          <span>{time}</span>
+          {msg.diagnostics && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>{formatMessageDiagnostics(msg.diagnostics)}</span>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

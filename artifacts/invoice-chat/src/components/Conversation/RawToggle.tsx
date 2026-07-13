@@ -3,6 +3,8 @@
 // for debugging what the backend actually returned.
 
 export function RawToggle({ raw, showRaw, onToggle }: { raw: unknown; showRaw: boolean; onToggle: () => void }) {
+  if (import.meta.env?.DEV !== true) return null;
+
   return (
     <div className="mt-2">
       <button onClick={onToggle} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">

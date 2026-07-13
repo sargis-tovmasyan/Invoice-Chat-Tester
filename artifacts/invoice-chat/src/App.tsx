@@ -11,7 +11,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { unlockAudio, playSend, playReceive, playSuccess, playError, playMissingFields, playConfirm, playPing } from "./lib/sounds";
 import { PROXY_BASE, INVOICE_FORM_FIELDS } from "./lib/constants";
 import { uid, deepClone, setNestedValue, normalizeFormValue, validateFormValues, buildInitialFormValues, responseErrorMessage, deriveSessionTitle } from "./lib/helpers";
-import { apiGet, sendChatMessageStream, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, persistChatError, deleteChatThread } from "./api/client";
+import { apiGet, sendChatMessageStream, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, persistChatError, deleteChatThread, type ChatStreamEvent } from "./api/client";
 import { createEmptySession } from "./session/sessionHelpers";
 
 import { Sidebar } from "./components/Sidebar/Sidebar";
@@ -21,15 +21,20 @@ import { Composer } from "./components/Composer/Composer";
 import { SettingsPanel } from "./components/Settings/SettingsPanel";
 import { SetupScreen } from "./components/Settings/SetupScreen";
 
-import type { ChatSession, Message, PendingForm, DraftObject, CompleteResponse, ChatResponse, InvoiceListItem, ParsedPayload, StoredChatMessage, ChatThread } from "./types";
+import type { ChatDiagnostics, ChatSession, Message, PendingForm, DraftObject, CompleteResponse, ChatResponse, InvoiceListItem, ParsedPayload, StoredChatMessage, ChatThread } from "./types";
 
 const CHAT_HISTORY_LOADING_LABEL = "Loading chat…";
 const STREAM_TYPE_INTERVAL_MS = 18;
 const STREAM_CHARS_PER_TICK = 3;
 
-async function persistClientChatError(chatId: string, message: string): Promise<void> {
+async function persistClientChatError(
+  chatId: string,
+  message: string,
+  diagnostics?: ChatDiagnostics,
+  raw?: Record<string, unknown>,
+): Promise<void> {
   try {
-    const persisted = await persistChatError(chatId, message);
+    const persisted = await persistChatError(chatId, message, true, diagnostics, raw);
     if (!persisted.ok) console.warn("Could not persist chat error", persisted.status);
   } catch (error) {
     console.warn("Could not persist chat error", error);
@@ -39,11 +44,21 @@ async function persistClientChatError(chatId: string, message: string): Promise<
 function parseStoredPayload(raw: unknown): ParsedPayload | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const record = raw as ChatResponse;
-  if (record.status === "invoice_list") return { kind: "invoice_list", invoices: record.invoices ?? [], raw };
-  if (record.status === "missing_fields") return { kind: "missing_fields", fields: INVOICE_FORM_FIELDS, draft: record.draft ?? {}, raw };
-  if (record.status === "created" || record.invoice_id) return { kind: "invoice", data: record, raw };
-  if (record.status === "ai_parse_error" || record.status === "llm_unavailable") return { kind: "error_status", message: record.message ?? "", status: record.status, raw };
+  const storedRaw = (record as ChatResponse & { raw?: unknown }).raw ?? raw;
+  if (record.status === "invoice_list") return { kind: "invoice_list", invoices: record.invoices ?? [], raw: storedRaw };
+  if (record.status === "missing_fields") return { kind: "missing_fields", fields: INVOICE_FORM_FIELDS, draft: record.draft ?? {}, raw: storedRaw };
+  if (record.status === "created" || record.invoice_id) return { kind: "invoice", data: record, raw: storedRaw };
+  if (record.status === "ai_parse_error" || record.status === "llm_unavailable") return { kind: "error_status", message: record.message ?? "", status: record.status, raw: storedRaw };
+  if (record.status === "answer" || record.status === "error") return { kind: "generic", raw: storedRaw };
   return undefined;
+}
+
+function parseStoredDiagnostics(raw: unknown): ChatDiagnostics | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const diagnostics = (raw as { diagnostics?: unknown }).diagnostics;
+  if (typeof diagnostics !== "object" || diagnostics === null) return undefined;
+  if (typeof (diagnostics as ChatDiagnostics).duration_ms !== "number") return undefined;
+  return diagnostics as ChatDiagnostics;
 }
 
 export function storedMessageToUi(message: StoredChatMessage): Message {
@@ -58,6 +73,7 @@ export function storedMessageToUi(message: StoredChatMessage): Message {
     timestamp: Number.isNaN(timestamp) ? Date.now() : timestamp,
     retryable: isError ? metadata.retryable !== false : undefined,
     payload: parseStoredPayload(metadata),
+    diagnostics: parseStoredDiagnostics(metadata),
     showRaw: false,
   };
 }
@@ -373,18 +389,22 @@ export default function App() {
     const requestBody = session?.backendChatId
       ? { message: text, chat_id: session.backendChatId, thinking_enabled: thinkingEnabled, temperature_preset: temperaturePreset }
       : { message: text, thinking_enabled: thinkingEnabled, temperature_preset: temperaturePreset };
+    const requestInfo = { method: "POST", endpoint: `${PROXY_BASE}/chat/stream`, body: requestBody };
+    const requestStartedAt = performance.now();
+    const streamEvents: ChatStreamEvent[] = [];
+    let streamedAssistantId: string | null = null;
     if (!preset) setInput("");
     playSend();
-    addMsg(sessionId, { role: "user", text, requestInfo: { method: "POST", endpoint: `${PROXY_BASE}/chat`, body: requestBody } });
+    addMsg(sessionId, { role: "user", text, requestInfo });
     setSessionLoading(sessionId, "Thinking…");
     try {
-      let streamedAssistantId: string | null = null;
       const { data: chatData, ok } = await sendChatMessageStream(
         text,
         session?.backendChatId,
         thinkingEnabled,
         temperaturePreset,
         (event) => {
+          streamEvents.push(event);
           if (event.type === "start" && event.chat_id) {
             requestChatId = event.chat_id;
             updateSession(sessionId, (current) => ({ ...current, backendChatId: event.chat_id }));
@@ -398,16 +418,37 @@ export default function App() {
           enqueueStreamText(sessionId, streamedAssistantId, event.content);
         },
       ) as { data: ChatResponse; ok: boolean };
+      const debugRaw = { request: requestInfo, events: streamEvents, result: chatData };
+      const partialDiagnostics = (): ChatDiagnostics => {
+        const startEvent = streamEvents.find((event) => event.type === "start");
+        return {
+          request_id: startEvent?.type === "start" ? startEvent.request_id ?? null : null,
+          trace_id: startEvent?.type === "start" ? startEvent.trace_id ?? null : null,
+          model: null,
+          duration_ms: performance.now() - requestStartedAt,
+          llm_calls: 0,
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0,
+          tokens_per_second: null,
+        };
+      };
       if (!ok) {
         playError();
         const errorText = `Chat request failed: ${String(chatData.message ?? (chatData as Record<string, unknown>).detail ?? "Server error")}`;
-        addMsg(sessionId, { role: "error", text: errorText, retryable: true, payload: { kind: "generic", raw: chatData } });
+        const diagnostics = chatData.diagnostics ?? partialDiagnostics();
+        if (streamedAssistantId) {
+          flushStreamQueue(sessionId, streamedAssistantId);
+          updateMessage(sessionId, streamedAssistantId, (message) => ({ ...message, streaming: false, payload: { kind: "generic", raw: debugRaw }, diagnostics }));
+        }
+        addMsg(sessionId, { role: "error", text: errorText, retryable: true, payload: { kind: "generic", raw: debugRaw }, diagnostics });
         if (requestChatId && !chatData.chat_id) {
-          await persistClientChatError(requestChatId, errorText);
+          await persistClientChatError(requestChatId, errorText, diagnostics, debugRaw);
         }
         return;
       }
       const status = chatData.status;
+      const diagnostics = chatData.diagnostics;
       if (chatData.chat_id) updateSession(sessionId, (current) => ({ ...current, backendChatId: chatData.chat_id }));
       if (status === "answer") {
         if (streamedAssistantId) {
@@ -416,31 +457,33 @@ export default function App() {
             ...message,
             text: chatData.message ?? message.text,
             streaming: false,
+            payload: { kind: "generic", raw: debugRaw },
+            diagnostics,
           }));
         } else {
           playReceive();
-          addMsg(sessionId, { role: "assistant", text: chatData.message ?? "How can I help?" });
+          addMsg(sessionId, { role: "assistant", text: chatData.message ?? "How can I help?", payload: { kind: "generic", raw: debugRaw }, diagnostics });
         }
         return;
       }
       if (status === "invoice_list") {
         playPing();
-        addMsg(sessionId, { role: "assistant", text: chatData.message ?? "Here are your invoices.", payload: { kind: "invoice_list", invoices: chatData.invoices ?? [], raw: chatData } });
+        addMsg(sessionId, { role: "assistant", text: chatData.message ?? "Here are your invoices.", payload: { kind: "invoice_list", invoices: chatData.invoices ?? [], raw: debugRaw }, diagnostics });
         return;
       }
       if (status === "ai_parse_error") {
         playError();
-        addMsg(sessionId, { role: "error", text: chatData.message ?? "Could not parse your request. Please try rephrasing.", retryable: true, payload: { kind: "error_status", message: chatData.message ?? "", status, raw: chatData } });
+        addMsg(sessionId, { role: "error", text: chatData.message ?? "Could not parse your request. Please try rephrasing.", retryable: true, payload: { kind: "error_status", message: chatData.message ?? "", status, raw: debugRaw }, diagnostics });
         return;
       }
       if (status === "llm_unavailable") {
         playError();
-        addMsg(sessionId, { role: "error", text: chatData.message ?? "AI assistant is temporarily unavailable. Please try again later.", retryable: true, payload: { kind: "error_status", message: chatData.message ?? "", status, raw: chatData } });
+        addMsg(sessionId, { role: "error", text: chatData.message ?? "AI assistant is temporarily unavailable. Please try again later.", retryable: true, payload: { kind: "error_status", message: chatData.message ?? "", status, raw: debugRaw }, diagnostics });
         return;
       }
       if (status === "created" || chatData.invoice_id) {
         playSuccess();
-        addMsg(sessionId, { role: "assistant", text: `Invoice created — ${chatData.invoice_number ?? `#${chatData.invoice_id}`}`, payload: { kind: "invoice", data: chatData, raw: chatData } });
+        addMsg(sessionId, { role: "assistant", text: `Invoice created — ${chatData.invoice_number ?? `#${chatData.invoice_id}`}`, payload: { kind: "invoice", data: chatData, raw: debugRaw }, diagnostics });
         return;
       }
       if (status === "missing_fields") {
@@ -449,7 +492,7 @@ export default function App() {
         const fields = INVOICE_FORM_FIELDS;
         const formMsgId = uid();
         playMissingFields();
-        addMsg(sessionId, { id: formMsgId, role: "assistant", text: "I need a few more details to complete your invoice:", payload: { kind: "missing_fields", fields, draft, raw: chatData } });
+        addMsg(sessionId, { id: formMsgId, role: "assistant", text: "I need a few more details to complete your invoice:", payload: { kind: "missing_fields", fields, draft, raw: debugRaw }, diagnostics });
         updateSession(sessionId, (s) => ({
           ...s,
           pendingForm: { messageId: formMsgId, chatId: chatData.chat_id ?? session?.backendChatId, draft, fields, missingFields, values: buildInitialFormValues(draft, fields), submitted: false },
@@ -457,13 +500,30 @@ export default function App() {
         return;
       }
       playReceive();
-      addMsg(sessionId, { role: "assistant", text: `Received status "${status ?? "unknown"}" from the API.`, payload: { kind: "generic", raw: chatData } });
+      addMsg(sessionId, { role: "assistant", text: `Received status "${status ?? "unknown"}" from the API.`, payload: { kind: "generic", raw: debugRaw }, diagnostics });
     } catch (err) {
       playError();
       const errorText = `Network error: ${err instanceof Error ? err.message : String(err)}`;
-      addMsg(sessionId, { role: "error", text: errorText, retryable: true });
+      const startEvent = streamEvents.find((event) => event.type === "start");
+      const diagnostics: ChatDiagnostics = {
+        request_id: startEvent?.type === "start" ? startEvent.request_id ?? null : null,
+        trace_id: startEvent?.type === "start" ? startEvent.trace_id ?? null : null,
+        model: null,
+        duration_ms: performance.now() - requestStartedAt,
+        llm_calls: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        tokens_per_second: null,
+      };
+      const debugRaw = { request: requestInfo, events: streamEvents, error: errorText };
+      if (streamedAssistantId) {
+        flushStreamQueue(sessionId, streamedAssistantId);
+        updateMessage(sessionId, streamedAssistantId, (message) => ({ ...message, streaming: false, payload: { kind: "generic", raw: debugRaw }, diagnostics }));
+      }
+      addMsg(sessionId, { role: "error", text: errorText, retryable: true, payload: { kind: "generic", raw: debugRaw }, diagnostics });
       if (requestChatId) {
-        await persistClientChatError(requestChatId, errorText);
+        await persistClientChatError(requestChatId, errorText, diagnostics, debugRaw);
       }
     } finally {
       clearSessionLoading(sessionId);

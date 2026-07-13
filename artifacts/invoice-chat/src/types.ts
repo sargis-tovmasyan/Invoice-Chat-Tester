@@ -42,6 +42,18 @@ export interface InvoiceListItem {
   [key: string]: unknown;
 }
 
+export interface ChatDiagnostics {
+  request_id: string | null;
+  trace_id: string | null;
+  model: string | null;
+  duration_ms: number;
+  llm_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  tokens_per_second: number | null;
+}
+
 export interface ChatResponse extends CompleteResponse {
   status: ChatStatus;
   chat_id?: string;
@@ -49,6 +61,7 @@ export interface ChatResponse extends CompleteResponse {
   invoices?: InvoiceListItem[];
   missing_fields?: string[];
   draft?: DraftObject;
+  diagnostics?: ChatDiagnostics;
 }
 
 export interface StoredChatMessage {
@@ -96,6 +109,7 @@ export interface Message {
   payload?: ParsedPayload;
   showRaw?: boolean;
   requestInfo?: RequestInfo;
+  diagnostics?: ChatDiagnostics;
 }
 
 export interface PendingForm {

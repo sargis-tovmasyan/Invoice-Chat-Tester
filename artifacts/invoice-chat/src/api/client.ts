@@ -4,7 +4,7 @@
 // the user configured (sent as the X-Api-Base header).
 
 import { PROXY_BASE, DEFAULT_API_BASE, LS_KEY } from "../lib/constants";
-import type { ChatResponse, ChatThread } from "../types";
+import type { ChatDiagnostics, ChatResponse, ChatThread } from "../types";
 
 export function getApiBase(): string {
   try {
@@ -86,8 +86,8 @@ export async function sendChatMessage(message: string, chatId?: string, thinking
   );
 }
 
-type ChatStreamEvent =
-  | { type: "start"; chat_id?: string }
+export type ChatStreamEvent =
+  | { type: "start"; chat_id?: string; request_id?: string | null; trace_id?: string | null }
   | { type: "token"; content: string }
   | { type: "final"; data: ChatResponse };
 
@@ -103,7 +103,12 @@ function parseSseEvents(buffer: string): { events: ChatStreamEvent[]; remaining:
     if (!eventName || !dataLine) continue;
     try {
       const parsed = JSON.parse(dataLine);
-      if (eventName === "start") events.push({ type: "start", chat_id: parsed.chat_id });
+      if (eventName === "start") events.push({
+        type: "start",
+        chat_id: parsed.chat_id,
+        request_id: parsed.request_id,
+        trace_id: parsed.trace_id,
+      });
       if (eventName === "token") events.push({ type: "token", content: String(parsed.content ?? "") });
       if (eventName === "final") events.push({ type: "final", data: parsed as ChatResponse });
     } catch {
@@ -178,10 +183,16 @@ export async function getChatThreads() {
   return apiGet<ChatThread[]>("/chat-threads");
 }
 
-export async function persistChatError(chatId: string, message: string, retryable = true) {
+export async function persistChatError(
+  chatId: string,
+  message: string,
+  retryable = true,
+  diagnostics?: Partial<ChatDiagnostics>,
+  raw?: Record<string, unknown>,
+) {
   return apiPost<import("../types").StoredChatMessage>(
     `/chat-threads/${encodeURIComponent(chatId)}/errors`,
-    { message, retryable },
+    { message, retryable, diagnostics, raw },
   );
 }
 
