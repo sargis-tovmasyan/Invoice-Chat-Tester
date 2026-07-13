@@ -142,6 +142,10 @@ proxyRouter.get("/chat-threads/:chatId/session-memory", async (req, res) => {
   await jsonProxy(`/chat-threads/${encodeURIComponent(req.params.chatId)}/session-memory`, "GET", undefined, res, req);
 });
 
+proxyRouter.post("/chat-threads/:chatId/errors", async (req, res) => {
+  await jsonProxy(`/chat-threads/${encodeURIComponent(req.params.chatId)}/errors`, "POST", req.body, res, req);
+});
+
 proxyRouter.delete("/chat-threads/:chatId/session-memory/document-scope", async (req, res) => {
   await jsonProxy(`/chat-threads/${encodeURIComponent(req.params.chatId)}/session-memory/document-scope`, "DELETE", undefined, res, req);
 });

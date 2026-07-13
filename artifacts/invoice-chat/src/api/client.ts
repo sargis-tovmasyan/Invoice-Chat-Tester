@@ -178,6 +178,13 @@ export async function getChatThreads() {
   return apiGet<ChatThread[]>("/chat-threads");
 }
 
+export async function persistChatError(chatId: string, message: string, retryable = true) {
+  return apiPost<import("../types").StoredChatMessage>(
+    `/chat-threads/${encodeURIComponent(chatId)}/errors`,
+    { message, retryable },
+  );
+}
+
 export async function deleteChatThread(chatId: string) {
   return apiDelete<{ status?: string; message?: string }>(`/chat-threads/${encodeURIComponent(chatId)}`);
 }

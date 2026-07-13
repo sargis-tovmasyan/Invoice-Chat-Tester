@@ -11,7 +11,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { unlockAudio, playSend, playReceive, playSuccess, playError, playMissingFields, playConfirm, playPing } from "./lib/sounds";
 import { PROXY_BASE, INVOICE_FORM_FIELDS } from "./lib/constants";
 import { uid, deepClone, setNestedValue, normalizeFormValue, validateFormValues, buildInitialFormValues, responseErrorMessage, deriveSessionTitle } from "./lib/helpers";
-import { apiGet, sendChatMessageStream, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, deleteChatThread } from "./api/client";
+import { apiGet, sendChatMessageStream, completeInvoiceDraft, getApiBase, isApiBaseConfigured, getChatThreads, getChatThread, persistChatError, deleteChatThread } from "./api/client";
 import { createEmptySession } from "./session/sessionHelpers";
 
 import { Sidebar } from "./components/Sidebar/Sidebar";
@@ -27,6 +27,15 @@ const CHAT_HISTORY_LOADING_LABEL = "Loading chat…";
 const STREAM_TYPE_INTERVAL_MS = 18;
 const STREAM_CHARS_PER_TICK = 3;
 
+async function persistClientChatError(chatId: string, message: string): Promise<void> {
+  try {
+    const persisted = await persistChatError(chatId, message);
+    if (!persisted.ok) console.warn("Could not persist chat error", persisted.status);
+  } catch (error) {
+    console.warn("Could not persist chat error", error);
+  }
+}
+
 function parseStoredPayload(raw: unknown): ParsedPayload | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const record = raw as ChatResponse;
@@ -37,14 +46,18 @@ function parseStoredPayload(raw: unknown): ParsedPayload | undefined {
   return undefined;
 }
 
-function storedMessageToUi(message: StoredChatMessage): Message {
+export function storedMessageToUi(message: StoredChatMessage): Message {
   const timestamp = message.created_at ? new Date(message.created_at).getTime() : Date.now();
+  const metadata = message.metadata ?? {};
+  const status = typeof metadata.status === "string" ? metadata.status : "";
+  const isError = status === "error" || status === "ai_parse_error" || status === "llm_unavailable";
   return {
     id: message.id,
-    role: message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : "system",
+    role: isError ? "error" : message.role === "user" || message.role === "assistant" || message.role === "system" ? message.role : "system",
     text: message.content,
     timestamp: Number.isNaN(timestamp) ? Date.now() : timestamp,
-    payload: parseStoredPayload(message.metadata ?? {}),
+    retryable: isError ? metadata.retryable !== false : undefined,
+    payload: parseStoredPayload(metadata),
     showRaw: false,
   };
 }
@@ -356,6 +369,7 @@ export default function App() {
     if (!text || activeSessionLoading || pendingForm !== null) return;
     const sessionId = activeSessionId;
     const session = sessions.find((item) => item.id === sessionId);
+    let requestChatId = session?.backendChatId;
     const requestBody = session?.backendChatId
       ? { message: text, chat_id: session.backendChatId, thinking_enabled: thinkingEnabled, temperature_preset: temperaturePreset }
       : { message: text, thinking_enabled: thinkingEnabled, temperature_preset: temperaturePreset };
@@ -372,6 +386,7 @@ export default function App() {
         temperaturePreset,
         (event) => {
           if (event.type === "start" && event.chat_id) {
+            requestChatId = event.chat_id;
             updateSession(sessionId, (current) => ({ ...current, backendChatId: event.chat_id }));
             return;
           }
@@ -385,7 +400,11 @@ export default function App() {
       ) as { data: ChatResponse; ok: boolean };
       if (!ok) {
         playError();
-        addMsg(sessionId, { role: "error", text: `Chat request failed: ${String(chatData.message ?? (chatData as Record<string, unknown>).detail ?? "Server error")}`, retryable: true, payload: { kind: "generic", raw: chatData } });
+        const errorText = `Chat request failed: ${String(chatData.message ?? (chatData as Record<string, unknown>).detail ?? "Server error")}`;
+        addMsg(sessionId, { role: "error", text: errorText, retryable: true, payload: { kind: "generic", raw: chatData } });
+        if (requestChatId && !chatData.chat_id) {
+          await persistClientChatError(requestChatId, errorText);
+        }
         return;
       }
       const status = chatData.status;
@@ -441,7 +460,11 @@ export default function App() {
       addMsg(sessionId, { role: "assistant", text: `Received status "${status ?? "unknown"}" from the API.`, payload: { kind: "generic", raw: chatData } });
     } catch (err) {
       playError();
-      addMsg(sessionId, { role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}`, retryable: true });
+      const errorText = `Network error: ${err instanceof Error ? err.message : String(err)}`;
+      addMsg(sessionId, { role: "error", text: errorText, retryable: true });
+      if (requestChatId) {
+        await persistClientChatError(requestChatId, errorText);
+      }
     } finally {
       clearSessionLoading(sessionId);
     }
