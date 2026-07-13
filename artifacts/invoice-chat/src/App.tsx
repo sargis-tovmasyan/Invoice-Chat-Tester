@@ -385,7 +385,7 @@ export default function App() {
       ) as { data: ChatResponse; ok: boolean };
       if (!ok) {
         playError();
-        addMsg(sessionId, { role: "error", text: `Chat request failed: ${String(chatData.message ?? (chatData as Record<string, unknown>).detail ?? "Server error")}`, payload: { kind: "generic", raw: chatData } });
+        addMsg(sessionId, { role: "error", text: `Chat request failed: ${String(chatData.message ?? (chatData as Record<string, unknown>).detail ?? "Server error")}`, retryable: true, payload: { kind: "generic", raw: chatData } });
         return;
       }
       const status = chatData.status;
@@ -411,12 +411,12 @@ export default function App() {
       }
       if (status === "ai_parse_error") {
         playError();
-        addMsg(sessionId, { role: "error", text: chatData.message ?? "Could not parse your request. Please try rephrasing.", payload: { kind: "error_status", message: chatData.message ?? "", status, raw: chatData } });
+        addMsg(sessionId, { role: "error", text: chatData.message ?? "Could not parse your request. Please try rephrasing.", retryable: true, payload: { kind: "error_status", message: chatData.message ?? "", status, raw: chatData } });
         return;
       }
       if (status === "llm_unavailable") {
         playError();
-        addMsg(sessionId, { role: "error", text: chatData.message ?? "AI assistant is temporarily unavailable. Please try again later.", payload: { kind: "error_status", message: chatData.message ?? "", status, raw: chatData } });
+        addMsg(sessionId, { role: "error", text: chatData.message ?? "AI assistant is temporarily unavailable. Please try again later.", retryable: true, payload: { kind: "error_status", message: chatData.message ?? "", status, raw: chatData } });
         return;
       }
       if (status === "created" || chatData.invoice_id) {
@@ -441,7 +441,7 @@ export default function App() {
       addMsg(sessionId, { role: "assistant", text: `Received status "${status ?? "unknown"}" from the API.`, payload: { kind: "generic", raw: chatData } });
     } catch (err) {
       playError();
-      addMsg(sessionId, { role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}` });
+      addMsg(sessionId, { role: "error", text: `Network error: ${err instanceof Error ? err.message : String(err)}`, retryable: true });
     } finally {
       clearSessionLoading(sessionId);
     }
@@ -484,7 +484,7 @@ export default function App() {
         <Header apiBase={apiBase} pendingForm={pendingForm} hasMessages={messages.length > 0} isBlocked={isBlocked} settingsOpen={settingsOpen} onRunHealth={() => runAction("GET /health", () => apiGet("/health"))} onRunInvoices={() => runAction("GET /invoices", () => apiGet("/invoices"))} onClearChat={clearChat} onToggleSettings={() => setSettingsOpen((o) => !o)} onToggleSidebar={() => setSidebarCollapsed((c) => !c)} />
         {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onSave={(base) => setApiBase(base)} />}
         <main className="flex-1 overflow-hidden flex flex-col min-h-0">
-          <ConversationArea messages={messages} loadingSession={isLoadingChatHistory} loading={activeSessionLoading} loadingLabel={activeLoadingLabel ?? "Thinking…"} pendingForm={pendingForm} formSubmitting={activeFormSubmitting} onSendExample={(p) => sendMessage(p)} onToggleRaw={toggleRaw} onFormChange={handleFormChange} onFormSubmit={handleFormSubmit} />
+          <ConversationArea messages={messages} loadingSession={isLoadingChatHistory} loading={activeSessionLoading} loadingLabel={activeLoadingLabel ?? "Thinking…"} pendingForm={pendingForm} formSubmitting={activeFormSubmitting} onSendExample={(p) => sendMessage(p)} onToggleRaw={toggleRaw} onFormChange={handleFormChange} onFormSubmit={handleFormSubmit} onRetry={() => void sendMessage("try again")} retryDisabled={isBlocked} />
           <Composer input={input} onInputChange={setInput} onSend={sendMessage} loading={activeSessionLoading} isBlocked={isBlocked} hasPendingForm={pendingForm !== null && !pendingForm.submitted} hasMessages={messages.length > 0} thinkingEnabled={thinkingEnabled} onThinkingChange={setThinkingEnabled} temperaturePreset={temperaturePreset} onTemperatureChange={setTemperaturePreset} textareaRef={textareaRef} />
         </main>
       </div>

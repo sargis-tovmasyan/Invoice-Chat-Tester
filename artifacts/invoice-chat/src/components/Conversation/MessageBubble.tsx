@@ -2,6 +2,7 @@
 // Renders a single chat message: user bubble, system marker, or an
 // assistant/error bubble with whatever response card its payload needs.
 
+import { RotateCcw } from "lucide-react";
 import { InvoiceCard } from "./InvoiceCard";
 import { InvoiceListPanel } from "./InvoiceListPanel";
 import { MissingFieldsForm } from "./MissingFieldsForm";
@@ -17,6 +18,8 @@ export function MessageBubble({
   onToggleRaw,
   onFormChange,
   onFormSubmit,
+  onRetry,
+  retryDisabled,
 }: {
   msg: Message;
   pendingForm: PendingForm | null;
@@ -24,6 +27,8 @@ export function MessageBubble({
   onToggleRaw: (id: string) => void;
   onFormChange: (field: string, value: string) => void;
   onFormSubmit: () => void;
+  onRetry: () => void;
+  retryDisabled: boolean;
 }) {
   const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const isUser = msg.role === "user";
@@ -65,7 +70,22 @@ export function MessageBubble({
 
       <div className="max-w-[75%] flex flex-col items-start">
         <div className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed shadow-sm ${isError ? "bg-red-50 border border-red-200 text-red-800" : "bg-card border border-border text-card-foreground"}`}>
-          {isError ? msg.text : <MarkdownMessage content={msg.text} tone="assistant" streaming={msg.streaming} />}
+          {isError ? (
+            <>
+              <div>{msg.text}</div>
+              {msg.retryable && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  disabled={retryDisabled}
+                  className="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-red-300 bg-white px-3 text-xs font-medium text-red-800 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Try again
+                </button>
+              )}
+            </>
+          ) : <MarkdownMessage content={msg.text} tone="assistant" streaming={msg.streaming} />}
           {msg.streaming && (
             <span className="streaming-caret ml-0.5 inline-block h-4 w-1 translate-y-0.5 rounded-full bg-primary/70 align-baseline" />
           )}

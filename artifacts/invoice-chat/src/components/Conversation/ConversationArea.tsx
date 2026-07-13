@@ -19,6 +19,8 @@ export function ConversationArea({
   onToggleRaw,
   onFormChange,
   onFormSubmit,
+  onRetry,
+  retryDisabled,
 }: {
   messages: Message[];
   loadingSession: boolean;
@@ -30,6 +32,8 @@ export function ConversationArea({
   onToggleRaw: (id: string) => void;
   onFormChange: (field: string, value: string) => void;
   onFormSubmit: () => void;
+  onRetry: () => void;
+  retryDisabled: boolean;
 }) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const hasStreamingMessage = messages.some((message) => message.streaming);
@@ -80,6 +84,8 @@ export function ConversationArea({
                 onToggleRaw={onToggleRaw}
                 onFormChange={onFormChange}
                 onFormSubmit={onFormSubmit}
+                onRetry={onRetry}
+                retryDisabled={retryDisabled}
               />
             ))}
 

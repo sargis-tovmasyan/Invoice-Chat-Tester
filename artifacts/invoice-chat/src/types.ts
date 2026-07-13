@@ -92,6 +92,7 @@ export interface Message {
   text: string;
   timestamp: number;
   streaming?: boolean;
+  retryable?: boolean;
   payload?: ParsedPayload;
   showRaw?: boolean;
   requestInfo?: RequestInfo;
