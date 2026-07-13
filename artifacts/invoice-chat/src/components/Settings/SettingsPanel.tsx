@@ -78,6 +78,12 @@ export function SettingsPanel({ onClose, onSave }: { onClose: () => void; onSave
               Reset to default ({DEFAULT_API_BASE})
             </button>
           )}
+          <div className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
+            <span>Frontend commit</span>
+            <code className="font-mono text-foreground" title={__APP_COMMIT_SHA__}>
+              {__APP_COMMIT_SHA__.slice(0, 7)}
+            </code>
+          </div>
         </div>
       </div>
     </div>

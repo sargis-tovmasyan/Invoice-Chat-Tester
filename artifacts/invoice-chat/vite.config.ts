@@ -19,6 +19,7 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const basePath = process.env.BASE_PATH;
+const commitSha = process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "local";
 
 if (!basePath) {
   throw new Error(
@@ -28,6 +29,9 @@ if (!basePath) {
 
 export default defineConfig({
   base: basePath,
+  define: {
+    __APP_COMMIT_SHA__: JSON.stringify(commitSha),
+  },
   plugins: [
     react(),
     tailwindcss(),
