@@ -3,7 +3,7 @@
 // for debugging what the backend actually returned.
 
 export function RawToggle({ raw, showRaw, onToggle }: { raw: unknown; showRaw: boolean; onToggle: () => void }) {
-  if (import.meta.env?.DEV !== true) return null;
+  if (import.meta.env?.DEV !== true && import.meta.env?.VITE_SHOW_RAW_JSON !== "true") return null;
 
   return (
     <div className="mt-2">
